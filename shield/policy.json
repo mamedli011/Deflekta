@@ -1,0 +1,19 @@
+{
+  "user_allowlist": {
+    "email_domains": ["me.example"],
+    "email_addresses": ["user@me.example"],
+    "url_hosts": ["localhost", "127.0.0.1"]
+  },
+  "rules": [
+    {"rule": "canary_token", "tools": ["send_email", "http_request"], "check": "canary_token",
+     "action": "BLOCK", "severity": "critical", "reason": "Outgoing data contains a planted bait secret (proof of exfiltration)"},
+    {"rule": "luhn_card_number", "tools": ["send_email", "http_request"], "check": "luhn_card_number",
+     "action": "BLOCK", "severity": "critical", "reason": "Outgoing data contains a payment card number"},
+    {"rule": "secret_pattern", "tools": ["send_email", "http_request"], "check": "secret_pattern",
+     "action": "BLOCK", "severity": "critical", "reason": "Outgoing data contains a credential or account-recovery link"},
+    {"rule": "unapproved_recipient", "tools": ["send_email", "http_request"], "check": "unapproved_recipient",
+     "action": "CONFIRM", "severity": "high", "reason": "Recipient is not on the user's approved list"},
+    {"rule": "destructive_action", "tools": ["delete_file"], "check": "destructive_action",
+     "action": "CONFIRM", "severity": "high", "reason": "Destructive action needs the user's confirmation"}
+  ]
+}

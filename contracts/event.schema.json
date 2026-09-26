@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ShieldEvent",
+  "type": "object",
+  "required": ["id", "timestamp", "session_id", "shield_on", "stage", "verdict", "reason"],
+  "properties": {
+    "id": {"type": "string"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "session_id": {"type": "string"},
+    "shield_on": {"type": "boolean"},
+    "stage": {"enum": ["input", "action", "agent", "final"]},
+    "tool": {"type": ["string", "null"]},
+    "args": {"type": "object"},
+    "verdict": {"enum": ["ALLOWED", "FLAGGED", "STRIPPED", "NEEDS_CONFIRM", "BLOCKED"]},
+    "severity": {"enum": ["low", "medium", "high", "critical", null]},
+    "layer": {"type": ["integer", "null"], "enum": [1, 2, 3, null]},
+    "rule_triggered": {"type": ["string", "null"]},
+    "reason": {"type": "string"},
+    "evidence": {"type": "object"},
+    "result": {}
+  },
+  "additionalProperties": true
+}

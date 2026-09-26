@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+# Run logs are local, except the cached demo runs (R2-T3), which are committed for replay.
+runs/*
+!runs/demo_*.jsonl
