@@ -42,7 +42,7 @@ tested with a fake model (`tests/test_agent_loop_offline.py`). What's untested i
   - Then the ablation (docs/07 section E): Shield ON with `SHIELD_LAYERS=3`, `1,3`, `1,2,3` on one page of
     each payload family, N=10 each. Write `benchmark/results/ablation.json`. Coordinate quota with R4.
   - This is the "unprotected agent fell for X of Y" number. Respect quota: run once, save results.
-- [ ] **R2-T6 NEEDS_CONFIRM hook** (after CP2)
+- [x] **R2-T6 NEEDS_CONFIRM hook** (after CP2)
   - Add optional `confirm: Callable[[str, dict, str], bool] | None = None` to `run_agent`
     (default None = auto-deny, as now). R1's UI passes a function that asks the user.
   - This is an additive change to the interface. Tell the team.

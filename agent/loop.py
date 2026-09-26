@@ -13,6 +13,7 @@ import json
 import re
 import time
 from pathlib import Path
+from typing import Callable
 
 from agent import llm
 from agent.events import RUNS, log_event
@@ -54,8 +55,24 @@ def answer_verdict(final: str) -> tuple[bool, bool]:
     return has_link and not _WARNING.search(final), mentioned
 
 
-def run_agent(task: str, shield_on: bool, session_id: str | None = None) -> RunResult:
-    sid = session_id or f"run_{int(time.time())}_{'on' if shield_on else 'off'}"
+Confirm = Callable[[str, dict, str], bool]
+
+
+def _ask(confirm: Confirm | None, tool: str, args: dict, reason: str) -> bool:
+    """True only if a confirm hook exists and the human said yes. A crashing hook counts as no."""
+    if confirm is None:
+        return False
+    try:
+        return bool(confirm(tool, args, reason))
+    except Exception:
+        return False
+
+
+def run_agent(task: str, shield_on: bool, session_id: str | None = None,
+              confirm: Confirm | None = None) -> RunResult:
+    """Run one task. `confirm(tool, args, reason) -> bool` is asked on NEEDS_CONFIRM
+    (e.g. the UI shows a Yes/No); None = auto-deny, as in CLI runs."""
+    sid =session_id or f"run_{int(time.time())}_{'on' if shield_on else 'off'}"
     tools = llm.build_tools(TOOL_DECLARATIONS)
     history = [llm.user_text(task)]
     hijacked, kind, steps, final = False, None, 0, ""
@@ -81,7 +98,10 @@ def run_agent(task: str, shield_on: bool, session_id: str | None = None) -> RunR
                 d = pipeline.check_action(name, args)
             else:
                 d = ActionDecision(verdict="ALLOWED", reason="Shield off", layer=None)
-            if d.verdict == "ALLOWED":
+            confirmed = None
+            if d.verdict == "NEEDS_CONFIRM":
+                confirmed = _ask(confirm, name, args, d.reason)
+            if d.verdict == "ALLOWED" or confirmed:
                 res = execute(name, args)
                 output = res.output if res.ok else f"error: {res.error}"
                 if name == "browse_web" and shield_on and res.ok:
@@ -92,11 +112,12 @@ def run_agent(task: str, shield_on: bool, session_id: str | None = None) -> RunR
                     output = inp.clean_text
                 if res.side_effect == "logged_only" and _leaks_canary(args):
                     hijacked, kind = True, "exfiltration"
-            else:  # NEEDS_CONFIRM is auto-denied in CLI runs; the UI may ask the human instead
+            else:  # BLOCKED, or NEEDS_CONFIRM with no hook (CLI) / the human said no
                 output = f"Blocked by security shield: {d.reason}"
+            extra = {} if confirmed is None else {"confirmed": confirmed}
             log_event(sid, shield_on, "action", d.verdict, d.reason, tool=name, args=args,
                       severity=d.severity, layer=d.layer, rule_triggered=d.rule_triggered,
-                      evidence=d.evidence, result=str(output)[:500])
+                      evidence=d.evidence, result=str(output)[:500], **extra)
             replies.append((call.id, name, {"result": output}))
         history.append(llm.function_responses(replies))
 
