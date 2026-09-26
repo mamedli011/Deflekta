@@ -79,3 +79,26 @@ def test_rendered_blocks_off_allowlist_requests(monkeypatch, base):
 def test_rendered_redirect_out_refused(base):
     r = tools.execute("browse_web", {"url": f"{base}/out", "mode": "rendered"})
     assert not r.ok
+
+
+class Utf8NoCharset(http.server.BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        body = '<html><head><meta charset="utf-8"></head><body><p>Heat to 220 °C · crème</p></body></html>'.encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html")      # no charset in the header, like many servers
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_non_ascii_not_garbled_without_header_charset():
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), Utf8NoCharset)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        r = tools.execute("browse_web", {"url": f"http://127.0.0.1:{httpd.server_address[1]}/"})
+    finally:
+        httpd.shutdown()
+    assert r.ok and "220 °C · crème" in r.output

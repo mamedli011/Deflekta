@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -38,6 +39,21 @@ def _allowed(url: str) -> bool:
     return (urlparse(url).hostname or "") in ALLOWED_BROWSE_HOSTS
 
 
+_META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?([\w-]+)""", re.IGNORECASE)
+
+
+def _charset(content_type: str, body: bytes) -> str:
+    """Header charset, else <meta charset>, else UTF-8. (requests alone falls back to Latin-1 for
+    text/html without a charset, which garbles every non-ASCII character the agent reads.)"""
+    m = re.search(r"charset=([\w-]+)", content_type, re.IGNORECASE) or _META_CHARSET.search(body[:4096])
+    name = m.group(1).decode() if m and isinstance(m.group(1), bytes) else (m.group(1) if m else "utf-8")
+    try:
+        "".encode(name)
+        return name
+    except LookupError:
+        return "utf-8"
+
+
 def _fetch(url: str) -> tuple[str, str, bool]:
     """GET with manual redirects (every hop re-checked against the allowlist) and a size cap.
     Returns (final_url, html, truncated). Raises requests.RequestException or ValueError."""
@@ -56,7 +72,7 @@ def _fetch(url: str) -> tuple[str, str, bool]:
                 if len(body) > MAX_PAGE_BYTES:
                     body, truncated = body[:MAX_PAGE_BYTES], True
                     break
-            return url, body.decode(r.encoding or "utf-8", errors="replace"), truncated
+            return url, body.decode(_charset(r.headers.get("content-type", ""), body), errors="replace"), truncated
     raise ValueError("too many redirects")
 
 
