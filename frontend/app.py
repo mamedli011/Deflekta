@@ -49,20 +49,73 @@ st.set_page_config(page_title="Invisible-Injection Shield", page_icon="🛡️",
 st.markdown(
     """
     <style>
-      div[data-testid="stExpander"] summary p { font-size: 0.92rem; }
-      .tag { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.75rem;
-             padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(148,163,184,.45);
-             color: rgba(148,163,184,1); margin-right: 6px; }
-      .banner { padding: 12px 16px; border-radius: 6px; font-weight: 600; font-size: 1.05rem;
-                margin: 4px 0 10px; border: 1px solid; }
-      .banner.bad  { background: rgba(185,28,28,.15); border-color: #b91c1c; color: #fca5a5; }
-      .banner.good { background: rgba(21,128,61,.15); border-color: #15803d; color: #86efac; }
-      .banner.neutral { background: rgba(100,116,139,.12); border-color: #64748b; color: #cbd5e1; }
-      .agent-text { font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 0.82rem;
-                    white-space: pre-wrap; padding: 10px; border-radius: 6px;
-                    border: 1px solid rgba(148,163,184,.3); }
-      .hidden-seg { color: #f87171; background: rgba(185,28,28,.18); padding: 1px 3px;
-                    border-radius: 3px; }
+      @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap');
+      :root { --bg:#070b12; --panel:#0d1420; --line:#1c2a3d; --cyan:#22d3ee; --dim:#7b8ba3;
+              --red:#ef4444; --green:#22c55e; --mono:'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace; }
+      [data-testid="stAppViewContainer"] {
+        background-color: var(--bg);
+        background-image: linear-gradient(rgba(34,211,238,.035) 1px, transparent 1px),
+                          linear-gradient(90deg, rgba(34,211,238,.035) 1px, transparent 1px);
+        background-size: 32px 32px; }
+      [data-testid="stHeader"] { background: transparent; }
+      [data-testid="stSidebar"] { background: var(--panel); border-right: 1px solid var(--line); }
+      [data-testid="stSidebar"] h3 { font-family: var(--mono); color: var(--cyan); font-size: .95rem;
+                                      letter-spacing: .08em; }
+      h1, h2, h3, h4 { font-family: var(--mono) !important; letter-spacing: -.01em; }
+      div[data-testid="stExpander"] details { background: rgba(13,20,32,.85); border: 1px solid var(--line);
+                                              border-radius: 4px; }
+      div[data-testid="stExpander"] summary p { font-size: .9rem; }
+      button[data-baseweb="tab"] p { font-family: var(--mono); letter-spacing: .05em; }
+
+      .term { font-family: var(--mono); border: 1px solid var(--line); border-radius: 6px;
+              background: var(--panel); margin-bottom: 14px; }
+      .term-bar { display:flex; gap:6px; align-items:center; padding: 7px 12px; border-bottom: 1px solid var(--line);
+                  color: var(--dim); font-size: .72rem; }
+      .dot { width:9px; height:9px; border-radius:50%; display:inline-block; }
+      .term-body { padding: 14px 16px; }
+      .prompt { color: var(--dim); font-size: .85rem; }
+      .prompt b { color: var(--cyan); font-weight: 600; }
+      .title { font-size: 1.9rem; font-weight: 700; color: #e6edf6; margin: 4px 0 2px; }
+      .cursor { display:inline-block; width:.55em; height:1.1em; background: var(--cyan); vertical-align:-3px;
+                margin-left:4px; animation: blink 1.1s steps(1) infinite; }
+      @keyframes blink { 50% { opacity: 0; } }
+      @media (prefers-reduced-motion: reduce) { .cursor { animation: none; } }
+      .sub { color: var(--dim); font-size: .8rem; }
+
+      .tag { font-family: var(--mono); font-size: .72rem; padding: 2px 8px; border-radius: 3px;
+             border: 1px solid var(--line); color: var(--dim); margin-right: 6px; }
+      .tag.armed { color: var(--green); border-color: rgba(34,197,94,.5); }
+      .tag.off { color: var(--red); border-color: rgba(239,68,68,.5); }
+
+      .tiles { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 6px 0 12px; }
+      .tile { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--cyan);
+              padding: 10px 12px; font-family: var(--mono); }
+      .tile .k { color: var(--dim); font-size: .7rem; letter-spacing: .06em; }
+      .tile .v { color: #e6edf6; font-size: 1.5rem; font-weight: 700; }
+      .tile.red { border-left-color: var(--red); } .tile.green { border-left-color: var(--green); }
+
+      .run-head { font-family: var(--mono); color: #e6edf6; margin: 18px 0 6px; font-size: 1rem; }
+      .run-head span { color: var(--dim); font-weight: 400; font-size: .8rem; margin-left: 8px; }
+
+      .banner { font-family: var(--mono); padding: 11px 14px; border-radius: 4px; font-weight: 700;
+                font-size: .95rem; margin: 4px 0 8px; border: 1px solid; }
+      .banner .code { opacity: .75; margin-right: 8px; }
+      .banner.bad  { background: rgba(239,68,68,.10); border-color: var(--red); color: #fca5a5;
+                     box-shadow: 0 0 18px rgba(239,68,68,.15) inset; }
+      .banner.good { background: rgba(34,197,94,.09); border-color: var(--green); color: #86efac; }
+      .banner.neutral { background: rgba(123,139,163,.08); border-color: var(--line); color: #cbd5e1; }
+
+      .chain { display:flex; flex-wrap:wrap; align-items:center; gap:6px; font-family: var(--mono);
+               font-size: .75rem; margin: 0 0 8px; }
+      .node { padding: 3px 9px; border-radius: 3px; border: 1px solid var(--line); color: #cbd5e1; }
+      .node.ALLOWED { border-color: rgba(34,197,94,.55); color: #86efac; }
+      .node.FLAGGED, .node.NEEDS_CONFIRM { border-color: rgba(234,179,8,.6); color: #fde047; }
+      .node.STRIPPED, .node.BLOCKED { border-color: var(--red); color: #fca5a5; background: rgba(239,68,68,.1); }
+      .arrow { color: var(--dim); }
+
+      .agent-text { font-family: var(--mono); font-size: .8rem; white-space: pre-wrap; padding: 10px;
+                    border-radius: 4px; border: 1px solid var(--line); background: #05080d; color: #cbd5e1; }
+      .hidden-seg { color: #f87171; background: rgba(239,68,68,.16); padding: 1px 3px; border-radius: 2px; }
     </style>
     """,
     unsafe_allow_html=True,
@@ -199,12 +252,22 @@ def row_label(ev: dict) -> str:
 def banner_html(hijacked, kind, evs) -> str:
     if hijacked:
         text = BANNER_TEXT.get(kind, "HIJACKED: the attack succeeded")
-        return f'<div class="banner bad">{text}</div>'
+        return f'<div class="banner bad"><span class="code">[!] ALERT</span>{text}</div>'
     if hijacked is False:
         if any(e.get("verdict") in SHIELD_VERDICTS for e in evs):
-            return '<div class="banner good">PROTECTED: attack stopped, task completed</div>'
-        return '<div class="banner neutral">No attack detected. Task completed.</div>'
-    return '<div class="banner neutral">Run did not finish. No result yet.</div>'
+            return ('<div class="banner good"><span class="code">[+] SECURE</span>'
+                    'PROTECTED: attack stopped, task completed</div>')
+        return '<div class="banner neutral"><span class="code">[i]</span>No attack detected. Task completed.</div>'
+    return '<div class="banner neutral"><span class="code">[?]</span>Run did not finish. No result yet.</div>'
+
+
+def chain_html(evs: list[dict]) -> str:
+    """Attack chain: one node per step, colored by verdict."""
+    parts = []
+    for ev in evs:
+        name = ev.get("tool") or ev.get("stage", "?")
+        parts.append(f'<span class="node {ev.get("verdict", "")}">{esc(str(name))}</span>')
+    return '<div class="chain">' + '<span class="arrow">&rarr;</span>'.join(parts) + '</div>'
 
 
 def hidden_segments(ev: dict) -> list[str]:
@@ -312,7 +375,7 @@ if "events" not in ss:
 # ---------------- sidebar ----------------
 
 with st.sidebar:
-    st.subheader("Controls")
+    st.subheader("// CONTROL PANEL")
     shield_on = st.toggle("Shield ON", value=True)
     task = st.text_area("Task for the agent", value=DEFAULT_TASK, height=90)
     if st.button("Run agent", type="primary"):
@@ -343,12 +406,25 @@ with st.sidebar:
 
 # ---------------- main area ----------------
 
-st.title("Invisible-Injection Shield")
-st.caption("What the AI agent did on each step, and what the shield decided.")
+st.markdown(
+    f"""
+    <div class="term">
+      <div class="term-bar"><span class="dot" style="background:#ef4444"></span>
+        <span class="dot" style="background:#eab308"></span><span class="dot" style="background:#22c55e"></span>
+        &nbsp; shield-console</div>
+      <div class="term-body">
+        <div class="prompt"><b>analyst@shield</b>:~$ monitor --agent --live</div>
+        <div class="title">Invisible-Injection Shield<span class="cursor"></span></div>
+        <div class="sub">What the AI agent did on each step, and what the shield decided.</div>
+      </div>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 if ss.error:
     st.error(ss.error)
 
-tab_timeline, tab_score = st.tabs(["Timeline", "Scorecard"])
+tab_timeline, tab_score = st.tabs(["EVENT TIMELINE", "SCORECARD"])
 
 with tab_timeline:
     events = ss.events
@@ -356,19 +432,31 @@ with tab_timeline:
         st.info("No events yet. Press Run agent or pick a saved run and press Replay.")
     else:
         runs = group_by_run(events)
-        m1, m2, m3, m4 = st.columns(4)
-        m1.metric("Runs", len(runs))
-        m2.metric("Events", len(events))
-        m3.metric("Hidden text stripped", sum(e.get("verdict") == "STRIPPED" for e in events))
-        m4.metric("Actions blocked", sum(e.get("verdict") == "BLOCKED" for e in events))
-        st.markdown(f'<span class="tag">SOURCE: {ss.source}</span><span class="tag">MODE: {ss.mode}</span>',
-                    unsafe_allow_html=True)
+        stripped = sum(e.get("verdict") == "STRIPPED" for e in events)
+        blocked = sum(e.get("verdict") == "BLOCKED" for e in events)
+        st.markdown(
+            f'''<div class="tiles">
+              <div class="tile"><div class="k">RUNS</div><div class="v">{len(runs)}</div></div>
+              <div class="tile"><div class="k">EVENTS</div><div class="v">{len(events)}</div></div>
+              <div class="tile red"><div class="k">HIDDEN TEXT STRIPPED</div><div class="v">{stripped}</div></div>
+              <div class="tile red"><div class="k">ACTIONS BLOCKED</div><div class="v">{blocked}</div></div>
+            </div>''',
+            unsafe_allow_html=True,
+        )
+        armed = "armed" if shield_on else "off"
+        st.markdown(
+            f'<span class="tag {armed}">SHIELD: {"ARMED" if shield_on else "DISARMED"}</span>'
+            f'<span class="tag">MODE: {ss.mode}</span><span class="tag">SOURCE: {ss.source}</span>',
+            unsafe_allow_html=True,
+        )
 
         for session_id, evs in runs.items():
             shield_state = evs[0].get("shield_on")
             label = {True: "Shield ON", False: "Shield OFF"}.get(shield_state, "Shield ?")
-            st.markdown(f"#### {label} &nbsp; `{session_id}`")
+            st.markdown(f'<div class="run-head">&gt; {label.upper()}<span>session={esc(session_id)}</span></div>',
+                        unsafe_allow_html=True)
             banner_slot = st.empty()          # filled after the events, so a replay keeps suspense
+            chain_slot = st.empty()
             for i, ev in enumerate(evs):
                 if ss.animate:
                     time.sleep(REPLAY_DELAY)
@@ -378,6 +466,7 @@ with tab_timeline:
                                    and field(ss.run_result, "session_id") in (None, session_id)) else None
             hijacked, kind, src = run_outcome(evs, rr)
             banner_slot.markdown(banner_html(hijacked, kind, evs), unsafe_allow_html=True)
+            chain_slot.markdown(chain_html(evs), unsafe_allow_html=True)
         ss.animate = False
 
 with tab_score:
