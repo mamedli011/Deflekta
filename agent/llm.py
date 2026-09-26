@@ -63,6 +63,9 @@ def generate(history: list[types.Content], tools: list[types.Tool], system: str,
         # 3.8 Flash migration: don't set temperature/top_p/top_k; use thinking_level, not thinking_budget.
         thinking_config=types.ThinkingConfig(thinking_level=os.environ.get("THINKING_LEVEL", "low")),
     )
+    # Optional, only for Flash-Lite agents (CP1 fallback step 3 in tasks/R2). Unset = model default.
+    if os.environ.get("TEMPERATURE"):
+        cfg.temperature = float(os.environ["TEMPERATURE"])
     for attempt in range(retries + 1):
         try:
             return client().models.generate_content(model=model, contents=history, config=cfg)
