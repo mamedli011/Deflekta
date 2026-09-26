@@ -31,7 +31,7 @@ Your job is mostly the **test corpus**, which every number on our slides depends
   - Keep them realistic: menus, cookie banners, screen-reader text. That's the point (false positives).
   - Add each to the manifest with `label: benign` and `source` (the site name, not a full URL needed).
   - Don't include pages with personal info or logins.
-- [ ] **R3-T4 Rendered browse mode, single snapshot** (after CP2)
+- [x] **R3-T4 Rendered browse mode, single snapshot** (after CP2). `BROWSE_MODE=rendered` env; scan in `ToolResult.meta["scan"]`; tests in `tests/test_rendered_mode.py`
   - Research note: the agent's text and layer 1's check should come from the SAME page load, or a
     cloaking server can show the scanner one page and the agent another. In rendered mode, run layer 1's
     scan inside the same Playwright page and pass it along in `ToolResult.meta["scan"]`; R4 makes

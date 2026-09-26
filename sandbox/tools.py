@@ -9,11 +9,13 @@ Hard rule: send_email, http_request, delete_file NEVER cause real side effects.
 STATUS
 - DONE (tested): execute dispatcher, read_email, read_file (sandboxed), log-only tools,
   browse_web mode="raw", TOOL_DECLARATIONS.
-- TODO (Role 3): browse_web mode="rendered" (Playwright page.content() then html2text).
+- DONE: browse_web mode="rendered" (Playwright, one page load for both the agent's text and the
+  layer-1 scan, which is passed along in meta["scan"]). Default mode comes from env BROWSE_MODE.
 """
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -43,13 +45,38 @@ def browse_web(url: str, mode: str = "raw") -> ToolResult:
     if host not in ALLOWED_BROWSE_HOSTS:
         return ToolResult(ok=False, output="", error=f"host not allowed in sandbox: {host}")
     if mode == "rendered":
-        return ToolResult(ok=False, output="", error="rendered mode not implemented yet (Role 3 TODO)")
+        return _browse_rendered(url)
     try:
         r = requests.get(url, timeout=8)
         r.raise_for_status()
     except requests.RequestException as exc:
         return ToolResult(ok=False, output="", error=f"fetch failed: {exc}")
     return ToolResult(ok=True, output=_to_text(r.text), meta={"url": url, "raw_html": r.text, "mode": mode})
+
+
+def _browse_rendered(url: str, timeout_ms: int = 10_000) -> ToolResult:
+    """How an AI browser sees a page: run its scripts, then convert the live DOM to text.
+    The layer-1 scan runs on the same page load and rides along in meta["scan"]."""
+    try:
+        from playwright.sync_api import sync_playwright
+        from shield.visibility_gap import scan_page
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page()
+                page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                html = page.content()                  # agent's view first: the scan marks the DOM
+                try:
+                    scan = scan_page(page, url)
+                except Exception as exc:  # scan problems must not cost the agent its page
+                    scan = {"url": url, "render_failed": True, "error": repr(exc), "segments": [],
+                            "human_html": None, "noscript_text": []}
+            finally:
+                browser.close()
+    except Exception as exc:  # Chromium missing, timeout, crash
+        return ToolResult(ok=False, output="", error=f"render failed: {exc!r}"[:500])
+    return ToolResult(ok=True, output=_to_text(html),
+                      meta={"url": url, "raw_html": html, "mode": "rendered", "scan": scan})
 
 
 def read_email(folder: str = "inbox") -> ToolResult:
@@ -93,6 +120,8 @@ def execute(tool: str, args: dict[str, Any] | None) -> ToolResult:
     fn = _TOOLS.get(tool)
     if fn is None:
         return ToolResult(ok=False, output="", error=f"unknown tool: {tool}")
+    if tool == "browse_web":  # the agent setup picks the browsing mode, not the model
+        args = {"mode": os.environ.get("BROWSE_MODE", "raw"), **(args or {})}
     try:
         return fn(**(args or {}))
     except TypeError as exc:  # model sent wrong/missing args
