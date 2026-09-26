@@ -2,7 +2,9 @@
 
 Public interface (see contracts/interfaces.py):
     check_action(tool, args) -> ActionDecision
-    check_input(url, page_text, raw_html=None) -> InputDecision
+    check_input(url, page_text, raw_html=None, scan=None) -> InputDecision
+        scan (optional, R4-T2b): a layer-1 scan from the same page load (browse_web rendered mode,
+        ToolResult.meta["scan"]). Reused if usable for this exact URL; otherwise we render as before.
     wrap_tools(execute_fn) -> guarded execute_fn        TODO (bonus, after CP3)
 
 Layer ablation: env SHIELD_LAYERS, e.g. "1,2,3" (default), "3" (action guard only), "1,3".
@@ -66,22 +68,37 @@ def _is_serious(span: str, noscript: str) -> bool:
     return len(span) > LOW_SEVERITY_MAX_CHARS and not (noscript and gapmod._norm(span) in noscript)
 
 
-def check_input(url: str, page_text: str, raw_html: str | None = None) -> InputDecision:
+def _usable_scan(scan: Any, url: str) -> bool:
+    """True if a supplied scan is a successful layer-1 scan of exactly this URL, with the shape
+    scan_url() returns. Anything else is ignored and we render the page ourselves."""
+    if not isinstance(scan, dict) or scan.get("url") != url or scan.get("render_failed") is not False:
+        return False
+    human_html = scan.get("human_html")
+    if not isinstance(human_html, str) or not human_html.strip():
+        return False
+    noscript = scan.get("noscript_text", [])
+    return (isinstance(scan.get("segments", []), list) and isinstance(noscript, list)
+            and all(isinstance(t, str) for t in noscript))
+
+
+def check_input(url: str, page_text: str, raw_html: str | None = None,
+                scan: dict | None = None) -> InputDecision:
     layers = enabled_layers()
     spans: list[str] = []
     segments: list[dict] = []
     noscript = ""
     render_failed, render_note = False, ""
     if 1 in layers:
-        scan = _scan(url)
-        if scan.get("render_failed") or not scan.get("human_html"):
+        # Reuse the same-load scan from browse_web when it's valid, so Chromium isn't run twice (R4-T2b).
+        layer1 = scan if _usable_scan(scan, url) else _scan(url)
+        if layer1.get("render_failed") or not layer1.get("human_html"):
             # Fail safe, not open: layer 1 is skipped but the judge (layer 2) still reads the page.
             render_failed = True
-            render_note = f" (layer 1 could not render the page: {scan.get('error', 'no output')})"
+            render_note = f" (layer 1 could not render the page: {layer1.get('error', 'no output')})"
         else:
-            segments = scan.get("segments", [])
-            noscript = _norm_set(scan.get("noscript_text", []))
-            spans = gapmod.gap(page_text, gapmod.to_text(scan["human_html"]))
+            segments = layer1.get("segments", [])
+            noscript = _norm_set(layer1.get("noscript_text", []))
+            spans = gapmod.gap(page_text, gapmod.to_text(layer1["human_html"]))
 
     verdict_j = _judge(page_text, spans) if 2 in layers else None
     judged_instruction = bool(verdict_j and verdict_j.get("grounded") and verdict_j.get("is_instruction_to_ai"))
