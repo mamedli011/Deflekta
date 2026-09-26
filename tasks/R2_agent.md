@@ -1,4 +1,4 @@
-# R2: Agent (owner: ______)
+# R2: Agent (owner: Magno Martinez)
 
 Folder: `agent/`. Read first: `CLAUDE.md`, `docs/13_interfaces.md`, `docs/06_agent_and_sandbox_spec.md`, `docs/03_stack.md`.
 You own the most important checkpoint: **CP1, the agent gets hijacked with Shield OFF.**
@@ -6,7 +6,7 @@ Starting point: `agent/llm.py` and `agent/loop.py` are drafts. The loop's plumbi
 tested with a fake model (`tests/test_agent_loop_offline.py`). What's untested is the real Gemini call.
 
 ## Tasks
-- [ ] **R2-T1 API smoke test** (first 30 min)
+- [x] **R2-T1 API smoke test** (first 30 min)
   - Get a key from AI Studio, `cp .env.example .env`, fill `GEMINI_API_KEY`.
   - `.env.example` already has `AGENT_MODEL=gemini-3.8-flash`, `JUDGE_MODEL=gemini-3.5-flash-lite`.
     Run `python scripts/list_models.py` to confirm both appear for your key.
