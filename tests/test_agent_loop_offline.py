@@ -116,6 +116,26 @@ def test_input_shield_crash_withholds_page(monkeypatch, base):
     assert "evil.example" not in browse["result"] and r.final_answer == "Sorry."
 
 
+@pytest.mark.parametrize("meta_scan", [None, {"url": "u", "render_failed": False, "segments": []}])
+def test_same_load_scan_is_passed_to_check_input(monkeypatch, meta_scan):
+    """R4-T2b: rendered mode's meta["scan"] goes to check_input; raw mode passes no scan at all."""
+    from contracts.interfaces import InputDecision, ToolResult
+    meta = {"raw_html": "<p>hi</p>", **({"scan": meta_scan} if meta_scan else {})}
+    monkeypatch.setattr(loop, "execute", lambda n, a: ToolResult(ok=True, output="hi", meta=meta))
+    seen = {}
+
+    def fake_check_input(url, text, raw_html=None, **kw):
+        seen.update(kw)
+        return InputDecision(verdict="ALLOWED", clean_text=text)
+
+    monkeypatch.setattr(loop.pipeline, "check_input", fake_check_input)
+    script = iter([_call("browse_web", {"url": "http://x/p.html"}), _text("ok")])
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: next(script))
+    r = loop.run_agent("x", True, session_id="scan_pass")
+    open(r.events_path, "w").close()
+    assert seen == ({"scan": meta_scan} if meta_scan else {})
+
+
 # ---- Attack layer 3 can't see: the page manipulates the assistant's ANSWER (no tool call) ----
 import re  # noqa: E402
 

@@ -71,8 +71,12 @@ def _ask(confirm: Confirm | None, tool: str, args: dict, reason: str) -> bool:
 def _checked_page(sid: str, args: dict, res) -> str:
     """Input shield on a browse_web result: log the decision, return the text the model may see.
     If the shield itself fails, the page is withheld (fail closed) and the run goes on."""
+    # Rendered mode already ran layer 1 on the same page load (R3's meta["scan"]): reuse it, no 2nd Chromium.
+    # Only passed when present, so raw mode also works with a check_input that predates `scan` (R4-T2b).
+    scan = res.meta.get("scan")
     try:
-        inp = pipeline.check_input(args.get("url", ""), res.output, res.meta.get("raw_html"))
+        inp = pipeline.check_input(args.get("url", ""), res.output, res.meta.get("raw_html"),
+                                   **({"scan": scan} if scan is not None else {}))
     except Exception as exc:
         log_event(sid, True, "input", "FLAGGED", "Input shield failed; page withheld from the model",
                   tool="browse_web", args=args, severity="medium", result=repr(exc)[:300])
