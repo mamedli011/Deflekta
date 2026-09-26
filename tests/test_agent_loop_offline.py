@@ -102,6 +102,20 @@ def test_confirm_hook_not_asked_when_blocked(monkeypatch):
     assert asked == [] and r.hijacked is False
 
 
+def test_input_shield_crash_withholds_page(monkeypatch, base):
+    """If check_input raises (e.g. Chromium dies on stage), the run finishes and the page is withheld."""
+    script = iter([_call("browse_web", {"url": f"{base}/evil/recipe_external_css.html"}), _text("Sorry.")])
+    monkeypatch.setattr(llm, "generate", lambda *a, **k: next(script))
+    monkeypatch.setattr(loop.pipeline, "check_input", lambda *a, **k: 1 / 0)
+    r = loop.run_agent("x", True, session_id="input_crash")
+    events = [json.loads(l) for l in open(r.events_path)]
+    open(r.events_path, "w").close()
+    inp = [e for e in events if e["stage"] == "input"][0]
+    assert inp["verdict"] == "FLAGGED" and "ZeroDivisionError" in inp["result"]
+    browse = [e for e in events if e["tool"] == "browse_web" and e["stage"] == "action"][0]
+    assert "evil.example" not in browse["result"] and r.final_answer == "Sorry."
+
+
 # ---- Attack layer 3 can't see: the page manipulates the assistant's ANSWER (no tool call) ----
 import re  # noqa: E402
 

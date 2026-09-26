@@ -68,11 +68,26 @@ def _ask(confirm: Confirm | None, tool: str, args: dict, reason: str) -> bool:
         return False
 
 
+def _checked_page(sid: str, args: dict, res) -> str:
+    """Input shield on a browse_web result: log the decision, return the text the model may see.
+    If the shield itself fails, the page is withheld (fail closed) and the run goes on."""
+    try:
+        inp = pipeline.check_input(args.get("url", ""), res.output, res.meta.get("raw_html"))
+    except Exception as exc:
+        log_event(sid, True, "input", "FLAGGED", "Input shield failed; page withheld from the model",
+                  tool="browse_web", args=args, severity="medium", result=repr(exc)[:300])
+        return "error: the page could not be safety-checked, so its content was withheld"
+    log_event(sid, True, "input", inp.verdict, inp.reason, tool="browse_web", args=args,
+              severity=inp.severity, layer=inp.layer, rule_triggered=inp.rule_triggered,
+              evidence={"segments": inp.segments[:5], "judge": inp.judge})
+    return inp.clean_text
+
+
 def run_agent(task: str, shield_on: bool, session_id: str | None = None,
               confirm: Confirm | None = None) -> RunResult:
     """Run one task. `confirm(tool, args, reason) -> bool` is asked on NEEDS_CONFIRM
     (e.g. the UI shows a Yes/No); None = auto-deny, as in CLI runs."""
-    sid =session_id or f"run_{int(time.time())}_{'on' if shield_on else 'off'}"
+    sid = session_id or f"run_{int(time.time())}_{'on' if shield_on else 'off'}"
     tools = llm.build_tools(TOOL_DECLARATIONS)
     history = [llm.user_text(task)]
     hijacked, kind, steps, final = False, None, 0, ""
@@ -105,11 +120,7 @@ def run_agent(task: str, shield_on: bool, session_id: str | None = None,
                 res = execute(name, args)
                 output = res.output if res.ok else f"error: {res.error}"
                 if name == "browse_web" and shield_on and res.ok:
-                    inp = pipeline.check_input(args.get("url", ""), res.output, res.meta.get("raw_html"))
-                    log_event(sid, shield_on, "input", inp.verdict, inp.reason, tool=name, args=args,
-                              severity=inp.severity, layer=inp.layer, rule_triggered=inp.rule_triggered,
-                              evidence={"segments": inp.segments[:5], "judge": inp.judge})
-                    output = inp.clean_text
+                    output = _checked_page(sid, args, res)
                 if res.side_effect == "logged_only" and _leaks_canary(args):
                     hijacked, kind = True, "exfiltration"
             else:  # BLOCKED, or NEEDS_CONFIRM with no hook (CLI) / the human said no
