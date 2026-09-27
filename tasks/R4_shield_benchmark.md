@@ -7,7 +7,8 @@ been run in real Chromium once (Sat morning) and passed on all current pages; co
 You own the differentiator. **Layer 1 must work on the external-CSS page by CP2.**
 
 ## Tasks
-- [ ] **R4-T1 Run layer 1** (first 1-2 hours)
+- [x] **R4-T1 Run layer 1** (first 1-2 hours)
+  - Status: done. `tests/test_visibility_gap.py` (corpus-aware: layer-1, known-bypass and layer-2 pages).
   - `pip install -r requirements.txt && python -m playwright install chromium`
   - `python -m http.server 8000 -d sandbox/pages` then
     `python -m shield.visibility_gap http://localhost:8000/evil/recipe_external_css.html`
@@ -25,28 +26,42 @@ You own the differentiator. **Layer 1 must work on the external-CSS page by CP2.
     `recipe_external_css.html`, and on `recipe_answer_phish.html` the final answer has no phishing link.
     Also run with `SHIELD_LAYERS=3` to confirm the phish page still gets through (that's the ablation point).
   - Tell R1 the final evidence shape (`segments` list, first items are the gap sentences).
+  - Status: real scan wired in and tested offline (`tests/test_pipeline_real.py`); R2's live Shield ON run
+    logged `STRIPPED` on the external-CSS page (`runs/demo_on.jsonl` on `r2-agent`). Not done: the phish-page and
+    `SHIELD_LAYERS=3` live checks, blocked until R3's attack succeeds against the unprotected agent.
 - [ ] **R4-T2b Use the tool's scan when present** (with R3-T4)
   - If `raw_html`/meta carries a scan from the same page load, use it instead of rendering again.
     (NFKC + zero-width/tag-character removal is already in `shield/gap.py`.)
+  - Status: R4 side done (`check_input(..., scan=None)`, `tests/test_pipeline_scan_reuse.py`); R2's hookup
+    is on `r2-agent`. Tick after integration.
 - [ ] **R4-T3 Baseline gap check on the real pages** (by CP2)
   - Re-run `python scripts/verify_baseline_gap.py` on your machine and confirm the gap still shows.
   - Extend it (or `benchmark/baseline.py`) to run sentinel-security on every page in the manifest.
     Output `benchmark/results/baseline.json`.
+  - Status: gap reproduced (4 techniques CLEAN; Windows needs `PYTHONUTF8=1`; `markdownify` added). The
+    per-manifest baseline is section B of `benchmark/run.py` (`corpus.json`), not a separate `baseline.json`.
+    Official run after integration.
 - [ ] **R4-T4 Layer 2 judge** (by CP3)
   - Implement `shield/judge.py` per docs/05: one call per page, JSON response schema
     (`response_mime_type="application/json"` + `response_schema`), exact-substring grounding check.
     Use `JUDGE_MODEL` and your own API key.
   - Plug into `check_input` with the decision table in docs/05.
   - Done when: `visible_disguised` page gets `FLAGGED` by layer 2, and a normal benign page gets `ALLOWED`.
+  - Status: implemented and hardened (local grounding, `hidden_complete`, delimiter and size limits; uses
+    `response_json_schema`); live 3-call smoke passed. Not done: the check above on R3's real pages.
 - [ ] **R4-T5 Benchmark A, B, D** (by CP3)
   - `benchmark/run.py`: for every manifest page, run layer 1 (+ layer 2 if quota allows) and the
     baseline. Write `benchmark/results/corpus.json` and generate `benchmark/results/summary.md` with:
     per-technique table (ours vs baseline), benign FLAG/STRIP counts and top reasons, and R2's
     attack-success numbers if `attack_success.json` exists, and the ablation table from `ablation.json`.
   - `summary.md` is the only source for slide numbers. Put the date, model ids and package versions in it.
+  - Status: runner done and tested (`benchmark/run.py`, sections A-E). Not done: the official
+    `corpus.json`/`summary.md` on the integrated corpus; judge columns for section D (needs benign corpus).
 - [ ] **R4-T6 Benchmark C** (after CP3, only if quota allows)
   - 100 samples each from `deepset/prompt-injections` and `leolee99/NotInject` through the judge.
     Precision/recall/F1 and NotInject false-positive rate. Needs `pip install datasets`.
+  - Status: runner done and offline-tested (`benchmark/judge_eval.py`; loads the pinned parquet files, so
+    `datasets` isn't needed). The live Benchmark C run has NOT been done (needs approval and quota).
 - [ ] **R4-T7 wrap_tools** (bonus) per docs/02 decision 2.
 
 ## Claude Code prompt for T1

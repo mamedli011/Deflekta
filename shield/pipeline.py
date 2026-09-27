@@ -10,8 +10,9 @@ Public interface (see contracts/interfaces.py):
 Layer ablation: env SHIELD_LAYERS, e.g. "1,2,3" (default), "3" (action guard only), "1,3".
 The benchmark runs Shield ON with each setting to show what each layer contributes.
 
-STATUS: decision logic tested with a faked layer-1 scan (tests/test_pipeline_input.py).
-The real scan (Playwright) and the judge (layer 2) are R4-T1 / R4-T4.
+STATUS: implemented and tested. Real Chromium layer-1 scan (tests/test_pipeline_real.py), same-load
+scan reuse (tests/test_pipeline_scan_reuse.py), Gemini judge with local grounding and hidden_complete
+checks (tests/test_judge.py; tests/conftest.py blocks live judge calls in the suite).
 """
 from __future__ import annotations
 
@@ -81,6 +82,25 @@ def _usable_scan(scan: Any, url: str) -> bool:
             and all(isinstance(t, str) for t in noscript))
 
 
+def _allowed_reason(layers: set[int], render_failed: bool, render_note: str, judge_known: bool) -> str:
+    """Explain an ALLOWED result by what actually ran. Text only: it never changes the decision."""
+    if 1 not in layers and 2 not in layers:
+        return "Not inspected: input layers 1 and 2 are off (SHIELD_LAYERS)"
+    if 1 not in layers:
+        parts = ["Layer 1 off (no hidden-text check)"]
+    elif render_failed:
+        parts = ["Hidden-text check not done" + render_note]
+    else:
+        parts = ["No hidden text found"]
+    if 2 not in layers:
+        parts.append("judge (layer 2) off")
+    elif judge_known:
+        parts.append("the judge did not flag the visible text")
+    else:
+        parts.append("no usable judge answer (unavailable or ungrounded)")
+    return "; ".join(parts)
+
+
 def check_input(url: str, page_text: str, raw_html: str | None = None,
                 scan: dict | None = None) -> InputDecision:
     layers = enabled_layers()
@@ -130,4 +150,4 @@ def check_input(url: str, page_text: str, raw_html: str | None = None,
                              reason="Visible page text appears to give instructions to the AI" + render_note,
                              judge=verdict_j, render_failed=render_failed)
     return InputDecision(verdict="ALLOWED", clean_text=page_text, judge=verdict_j, render_failed=render_failed,
-                         reason=("No hidden or instruction-like content" + render_note).strip())
+                         reason=_allowed_reason(layers, render_failed, render_note, judge_known))
