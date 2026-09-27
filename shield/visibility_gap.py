@@ -208,15 +208,49 @@ def scan_page(page, url: str) -> dict:
     return _result(url, raw, human_html, page.content())
 
 
+def _in_sandbox(url: str) -> bool:
+    """The sandbox browse policy (sandbox.tools: localhost / 127.0.0.1 only), plus about:blank."""
+    from sandbox.tools import _allowed
+    return url == "about:blank" or _allowed(url)
+
+
+def _sandbox_launch_args() -> list[str]:
+    """Chromium resolves no host name outside the sandbox, so nothing (DNS prefetch and preconnect
+    included) can reach another host even if a request slipped past the page routes."""
+    from sandbox.tools import ALLOWED_BROWSE_HOSTS
+    return ["--host-resolver-rules=MAP * ~NOTFOUND , "
+            + " , ".join(f"EXCLUDE {h}" for h in sorted(ALLOWED_BROWSE_HOSTS))]
+
+
+def _connect_if_sandbox(ws) -> None:
+    """Sandbox WebSockets connect as normal. Any other one is never connected: Playwright then serves the
+    page a mock socket and nothing reaches the network. (ws.close() here deadlocks the sync API.)"""
+    if _in_sandbox(ws.url):
+        ws.connect_to_server()
+
+
+def _guard(page) -> None:
+    """Refuse every request and WebSocket to a host outside the sandbox (CLAUDE.md hard rule).
+    Same policy as sandbox.tools browse_web(mode="rendered")."""
+    page.route("**/*", lambda route: route.continue_() if _in_sandbox(route.request.url) else route.abort())
+    page.route_web_socket("**", _connect_if_sandbox)
+
+
 def scan_url(url: str, timeout_ms: int = 10_000) -> dict:
-    """Render `url` and return hidden segments. Never raises: returns render_failed=True instead."""
+    """Render `url` and return hidden segments. Never raises: returns render_failed=True instead.
+    Only sandbox hosts are ever contacted: the page, its subresources and any redirect."""
     try:
+        if not _in_sandbox(url):
+            raise ValueError(f"host not allowed in sandbox: {url}")
         from playwright.sync_api import sync_playwright  # lazy, so tests don't need it
         with sync_playwright() as p:
-            browser = p.chromium.launch()
+            browser = p.chromium.launch(args=_sandbox_launch_args())
             try:
-                page = browser.new_page()
+                page = browser.new_page(service_workers="block")
+                _guard(page)
                 page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                if not _in_sandbox(page.url):          # a redirect chain ended outside the sandbox
+                    raise ValueError(f"page left the sandbox: {page.url}")
                 return scan_page(page, url)
             finally:
                 browser.close()
