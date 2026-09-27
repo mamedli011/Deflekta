@@ -336,10 +336,15 @@ def show_event_details(ev: dict, key: str) -> None:
     c2.markdown(f"**Layer**  \n`{ev.get('layer') if ev.get('layer') is not None else 'none'}`")
     c3.markdown(f"**Severity**  \n`{ev.get('severity') or 'none'}`")
 
+    ev_data = ev.get("evidence") or {}
     if ev.get("stage") == "input":
         show_side_by_side(ev, key)
-    elif (ev.get("evidence") or {}).get("hidden_text"):
-        st.error(ev["evidence"]["hidden_text"])
+    elif ev_data.get("hidden_text"):
+        st.markdown("**Hidden text the shield found**")
+        st.error(ev_data["hidden_text"], icon="🚫")
+    elif ev_data.get("matched"):
+        st.markdown("**Blocked content (masked)**")
+        st.error(str(ev_data["matched"]), icon="🚫")
 
     st.markdown("**args**")
     if ev.get("tool") in LOG_ONLY_TOOLS:
@@ -394,7 +399,9 @@ with st.sidebar:
     st.subheader("Controls")
     shield_on = st.toggle("Shield ON", value=True)
     task = st.text_area("Task for the agent", value=DEFAULT_TASK, height=90)
-    if st.button("Run agent", type="primary"):
+    run_clicked = st.button("Run agent", type="primary", use_container_width=True,
+                            help="Runs the live agent (needs the API key). Use Replay for a safe offline demo.")
+    if run_clicked:
         ss.error = None
         try:
             with st.spinner("Agent is running..."):
@@ -413,7 +420,8 @@ with st.sidebar:
     files = saved_run_files()
     if files:
         choice = st.selectbox("Replay saved run", files, format_func=rel)
-        if st.button("Replay"):
+        if st.button("Replay", use_container_width=True,
+                     help="Plays a saved run step by step. Works with no internet."):
             ss.events = replay_events(choice)
             ss.source, ss.mode, ss.run_result, ss.animate, ss.error = rel(choice), "REPLAY", None, True, None
     else:
@@ -454,7 +462,8 @@ tab_timeline, tab_score = st.tabs(["Timeline", "Scorecard"])
 with tab_timeline:
     events = ss.events
     if not events:
-        st.info("No events yet. Press Run agent or pick a saved run and press Replay.")
+        st.info("👈 Pick a saved run in the sidebar and press **Replay** to see the agent in action. "
+                "This works fully offline, so it's the safe choice for the demo.")
     else:
         runs = group_by_run(events)
         stripped = sum(e.get("verdict") == "STRIPPED" for e in events)
@@ -471,9 +480,11 @@ with tab_timeline:
         armed = "armed" if shield_on else "off"
         st.markdown(
             f'<span class="tag {armed}">SHIELD: {"ARMED" if shield_on else "DISARMED"}</span>'
-            f'<span class="tag">MODE: {ss.mode}</span><span class="tag">SOURCE: {ss.source}</span>',
+            f'<span class="tag">MODE: {esc(ss.mode)}</span><span class="tag">SOURCE: {esc(ss.source)}</span>',
             unsafe_allow_html=True,
         )
+        st.caption("Verdicts:  🟢 allowed   🟡 flagged / needs confirm   🔴 stripped / blocked. "
+                   "Click any step to expand it.")
 
         for session_id, evs in runs.items():
             shield_state = evs[0].get("shield_on")
