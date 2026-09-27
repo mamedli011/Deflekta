@@ -189,10 +189,10 @@ def metadata(manifest_path: Path) -> dict:
     }
 
 
-def _read_r2(path: Path) -> tuple[dict | None, str | None]:
+def _read_r2(path: Path, producer: str = "R2 produces it") -> tuple[dict | None, str | None]:
     """(document, None), or (None, why it is not available). Never raises."""
     if not path.exists():
-        return None, f"`{path.name}` not found in the results folder (R2 produces it)"
+        return None, f"`{path.name}` not found in the results folder ({producer})"
     try:
         doc = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
@@ -221,6 +221,34 @@ def _r2_section(title: str, path: Path, with_layers: bool) -> list[str]:
                                     "hijack_rate", "errors")]
         lines.append("| " + " | ".join(cells) + " |")
     return lines + [""]
+
+
+def _c_section(path: Path) -> list[str]:
+    """Benchmark C, copied from benchmark/judge_eval.py's output. Nothing is computed here."""
+    lines = ["## C. Layer 2 judge on outside datasets", ""]
+    doc, why = _read_r2(path, producer="`python -m benchmark.judge_eval` produces it")
+    if doc is None:
+        return lines + [f"Not available: {why}. Benchmark C has not been run.", ""]
+    cfg, s, meta = doc.get("config") or {}, doc.get("summary") or {}, doc.get("metadata") or {}
+    ds = cfg.get("datasets") or {}
+    inj, ben, lat = s.get("injection") or {}, s.get("benign") or {}, s.get("latency_ms") or {}
+    lines += [f"Copied from `{path.name}`. Judge model: `{cfg.get('judge_model')}`, date {meta.get('date')}, "
+              f"commit `{meta.get('git_commit')}`, seed {cfg.get('seed')}, n per dataset {cfg.get('n_per_dataset')}, "
+              f"calls finished {doc.get('finished_calls')}/{doc.get('planned_calls')}. "
+              f"Flagged = grounded AND is_instruction_to_ai AND confidence >= {cfg.get('visible_flag_confidence')} "
+              "(the pipeline's visible-only rule). Unavailable and ungrounded answers are not predictions."]
+    if doc.get("finished_calls") != doc.get("planned_calls") or doc.get("stopped_early"):
+        lines.append(f"**Partial run** ({doc.get('stopped_early') or 'not all planned calls finished'}).")
+    lines += ["", "| dataset | evaluated | valid (coverage) | unavailable | ungrounded | result |", "|---|---|---|---|---|---|",
+              f"| {(ds.get('injection') or {}).get('id')} | {inj.get('evaluated')} | {inj.get('valid')} ({inj.get('coverage')}) | "
+              f"{inj.get('unavailable')} | {inj.get('ungrounded')} | TP {inj.get('tp')}, FP {inj.get('fp')}, TN {inj.get('tn')}, "
+              f"FN {inj.get('fn')}; precision {inj.get('precision')}, recall {inj.get('recall')}, F1 {inj.get('f1')} |",
+              f"| {(ds.get('benign') or {}).get('id')} | {ben.get('evaluated')} | {ben.get('valid')} ({ben.get('coverage')}) | "
+              f"{ben.get('unavailable')} | {ben.get('ungrounded')} | false positives {ben.get('false_positives')}, "
+              f"false-positive rate {ben.get('false_positive_rate')} |",
+              "", f"- Judge latency over answered calls ({lat.get('answered_calls')}): median {lat.get('median')} ms, "
+                  f"p90 {lat.get('p90')} ms", ""]
+    return lines
 
 
 def render_summary(meta: dict, agg: dict, baseline_error: str | None, results_dir: Path) -> str:
@@ -274,7 +302,8 @@ def render_summary(meta: dict, agg: dict, baseline_error: str | None, results_di
                   + (f" ({', '.join(agg['baseline_gap_techniques'])})" if agg["baseline_gap_techniques"] else ""),
               "", "Techniques where the baseline caught a page that layer 1 missed: "
                   + (", ".join(agg["baseline_only_techniques"]) or "none")]
-    L += ["", "## D. Benign pages (false positives)", "",
+    L += [""] + _c_section(results_dir / "judge_eval.json")
+    L += ["## D. Benign pages (false positives)", "",
           f"- Pages: {b['pages']}; ALLOWED {b['ALLOWED']}, FLAGGED {b['FLAGGED']}, STRIPPED {b['STRIPPED']}",
           "- Top reasons: " + (", ".join(f"{r} ({n})" for r, n in b["top_reasons"]) or "none"), ""]
     L += _r2_section("Attack success, Shield OFF (R2)", results_dir / "attack_success.json", with_layers=False)
