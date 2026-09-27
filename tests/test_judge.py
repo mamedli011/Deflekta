@@ -103,7 +103,12 @@ def test_visible_disguised_instruction_flagged_medium_by_layer2(monkeypatch, mod
     d = visible_note_decision(monkeypatch)
     assert d.verdict == "FLAGGED" and d.severity == "medium" and d.layer == 2
     assert d.rule_triggered == "visible_instruction_to_ai"
-    assert d.clean_text == to_text(VISIBLE_PAGE)                    # visible text is never stripped
+    # Intentional policy change (R4 layer-2 remediation): this used to assert clean_text == the page text,
+    # i.e. a flagged visible instruction still reached the agent. Now the sentence holding the grounded quote
+    # is removed and the rest of the visible page is kept.
+    assert VISIBLE_QUOTE not in d.clean_text and "[instruction to the AI removed by shield]" in d.clean_text
+    assert d.clean_text == to_text(VISIBLE_PAGE).replace(VISIBLE_NOTE, "[instruction to the AI removed by shield]")
+    assert d.judge["removed_visible"] == [VISIBLE_NOTE]
 
 
 # ---- 4-6: unusable model output or errors -> judge unavailable, check_input still protects ----

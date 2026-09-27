@@ -17,6 +17,7 @@ checks (tests/test_judge.py; tests/conftest.py blocks live judge calls in the su
 from __future__ import annotations
 
 import os
+import re
 from typing import Any
 
 from contracts.interfaces import ActionDecision, InputDecision
@@ -25,6 +26,59 @@ from shield.action_guard import ActionGuard
 
 _GUARD = ActionGuard()
 LOW_SEVERITY_MAX_CHARS = 60   # short hidden strings (skip links, menu labels) are only FLAGGED
+VISIBLE_FLAG_CONFIDENCE = 0.8  # a grounded visible instruction at or above this is flagged and removed
+MIN_VISIBLE_QUOTE = 15         # shorter judge quotes never remove visible text (too generic to trust)
+VISIBLE_PLACEHOLDER = "[instruction to the AI removed by shield]"
+
+
+# Structure inside one html2text line that a removal must not eat: table cell separators ("a | b"), and a
+# leading list marker / heading / blockquote / emphasised label with a colon ("- **Step 3:** ...").
+_CELL_BEFORE = re.compile(r"\|[ \t]+")
+_CELL_AFTER = re.compile(r"[ \t]+\|")
+_LEAD = re.compile(r"(?:[ \t]*(?:[-*+]|\d{1,3}[.)])[ \t]+|[ \t]*>[ \t]*|[ \t]*#{1,6}[ \t]+)*"
+                   r"(?:[ \t]*(?:\*\*[^*\n]{1,60}?:\*\*|\*\*[^*\n]{1,60}?\*\*:|__[^_\n]{1,60}?:__)[ \t]+)?")
+
+
+def remove_quoted_instruction(text: str, quote: str) -> tuple[str, list[str]]:
+    """Remove the sentence around each exact occurrence of `quote` in `text`. A removed piece runs from the
+    sentence boundary before the quote to the one after it (same splitter as shield/gap.py), never past a
+    newline or a table-cell separator, and keeps a leading list marker / heading / labelled prefix, so table
+    labels and list structure stay. Overlapping pieces are merged. Returns (new_text, removed_pieces); a
+    quote that is too short or not found changes nothing."""
+    if len(quote.strip()) < MIN_VISIBLE_QUOTE or quote not in text:
+        return text, []
+    ranges: list[list[int]] = []
+    i = text.find(quote)
+    while i != -1:
+        j = i + len(quote)
+        line_start = text.rfind("\n", 0, i) + 1
+        line_end = text.find("\n", j)
+        line_end = len(text) if line_end == -1 else line_end
+        start = line_start
+        for m in gapmod._SPLIT.finditer(text, line_start, i):
+            start = m.end()
+        for m in _CELL_BEFORE.finditer(text, start, i):       # stay inside the quote's table cell
+            start = m.end()
+        lead = _LEAD.match(text, start, i)                     # keep list markers / labelled prefixes
+        if lead:
+            start = lead.end()
+        after = gapmod._SPLIT.search(text, j, line_end)
+        end = after.start() if after else line_end
+        cell = _CELL_AFTER.search(text, j, end)
+        if cell:
+            end = cell.start()
+        if ranges and start <= ranges[-1][1]:
+            ranges[-1][1] = max(ranges[-1][1], end)          # overlapping piece: remove once
+        else:
+            ranges.append([start, end])
+        i = text.find(quote, j)
+    out, removed, pos = [], [], 0
+    for start, end in ranges:
+        out += [text[pos:start], VISIBLE_PLACEHOLDER]
+        removed.append(text[start:end])
+        pos = end
+    out.append(text[pos:])
+    return "".join(out), removed
 
 
 def enabled_layers() -> set[int]:
@@ -132,22 +186,35 @@ def check_input(url: str, page_text: str, raw_html: str | None = None,
     except (TypeError, ValueError):
         conf = 0.0
 
+    def remove_visible(text: str) -> tuple[str, dict | None, str]:
+        """A grounded visible instruction (>= 0.8) still in `text` after layer 1 is removed. The removed
+        pieces are recorded locally on a copy of the judge evidence (never taken from the model)."""
+        if not (judged_instruction and conf >= VISIBLE_FLAG_CONFIDENCE):
+            return text, verdict_j, ""
+        new, removed = remove_quoted_instruction(text, str(verdict_j.get("quoted_span") or ""))
+        if not removed:
+            return text, verdict_j, ""
+        return new, {**verdict_j, "removed_visible": removed}, "; the instruction to the AI was removed"
+
     if spans:
-        clean = gapmod.strip(page_text, spans)
+        clean, evidence, note = remove_visible(gapmod.strip(page_text, spans))
+        note = note.replace("the instruction", "a visible instruction")
         serious = [s for s in spans if _is_serious(s, noscript)]
         if hidden_instruction and conf >= 0.6 or (serious and not hidden_known):
             return InputDecision(verdict="STRIPPED", clean_text=clean, severity="high", layer=1,
                                  rule_triggered="hidden_from_human_fed_to_ai",
-                                 reason="The page fed the AI text that a person can't see; it was removed",
-                                 segments=[{"text": s} for s in spans] + segments[:10], judge=verdict_j)
+                                 reason="The page fed the AI text that a person can't see; it was removed" + note,
+                                 segments=[{"text": s} for s in spans] + segments[:10], judge=evidence)
         return InputDecision(verdict="FLAGGED", clean_text=clean, severity="low", layer=1,
                              rule_triggered="hidden_text_not_instruction",
-                             reason="Hidden text found (likely menus or screen-reader text); removed as a precaution",
-                             segments=[{"text": s} for s in spans] + segments[:10], judge=verdict_j)
-    if judged_instruction and conf >= 0.8:
-        return InputDecision(verdict="FLAGGED", clean_text=page_text, severity="medium", layer=2,
+                             reason="Hidden text found (likely menus or screen-reader text); removed as a precaution"
+                                    + note,
+                             segments=[{"text": s} for s in spans] + segments[:10], judge=evidence)
+    if judged_instruction and conf >= VISIBLE_FLAG_CONFIDENCE:
+        clean, evidence, note = remove_visible(page_text)
+        return InputDecision(verdict="FLAGGED", clean_text=clean, severity="medium", layer=2,
                              rule_triggered="visible_instruction_to_ai",
-                             reason="Visible page text appears to give instructions to the AI" + render_note,
-                             judge=verdict_j, render_failed=render_failed)
+                             reason="Visible page text appears to give instructions to the AI" + note + render_note,
+                             judge=evidence, render_failed=render_failed)
     return InputDecision(verdict="ALLOWED", clean_text=page_text, judge=verdict_j, render_failed=render_failed,
                          reason=_allowed_reason(layers, render_failed, render_note, judge_known))
