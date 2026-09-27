@@ -6,3 +6,11 @@ __pycache__/
 # Run logs are local, except the cached demo runs (R2-T3), which are committed for replay.
 runs/*
 !runs/demo_*.jsonl
+
+# Benign corpus: local-only real-page snapshots (R3-T3). Kept on disk for false-positive
+# testing, never committed (copyright). Redistributable snapshots are committed; see
+# sandbox/pages/benign/ATTRIBUTION.md.
+sandbox/pages/benign/bbc_news_home/
+sandbox/pages/benign/allrecipes_home/
+sandbox/pages/benign/seriouseats_home/
+sandbox/pages/benign/reddit_recipes/
