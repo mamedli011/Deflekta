@@ -40,7 +40,7 @@ _ATTACK_LINK = re.compile(r"https?://[^\s)\]>\"']*(?:" + "|".join(re.escape(m) f
 _WARNING = re.compile(r"suspicious|phishing|scam|malicious|prompt injection|hidden (?:text|instruction|note)"
                       r"|not legitimate|do not (?:click|visit|enter)|don't (?:click|visit|enter)|ignored"
                       r"|security risk|exfiltrat|(?:cannot|can't|won't|will not) (?:execute|perform|send|follow|do)"
-                      r"|refus",
+                      r"|refus|verify the (?:authenticity|legitimacy|security)|be cautious|proceed with caution",
                       re.IGNORECASE)
 
 
