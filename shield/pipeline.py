@@ -101,7 +101,9 @@ def check_input(url: str, page_text: str, raw_html: str | None = None,
             spans = gapmod.gap(page_text, gapmod.to_text(layer1["human_html"]))
 
     verdict_j = _judge(page_text, spans) if 2 in layers else None
-    judged_instruction = bool(verdict_j and verdict_j.get("grounded") and verdict_j.get("is_instruction_to_ai"))
+    # An ungrounded verdict stays in the evidence but counts as "no judge" for decisions.
+    judge_known = bool(verdict_j and verdict_j.get("grounded"))
+    judged_instruction = bool(judge_known and verdict_j.get("is_instruction_to_ai"))
     try:
         conf = float(verdict_j.get("confidence", 0)) if verdict_j else 0.0
     except (TypeError, ValueError):
@@ -110,7 +112,7 @@ def check_input(url: str, page_text: str, raw_html: str | None = None,
     if spans:
         clean = gapmod.strip(page_text, spans)
         serious = [s for s in spans if _is_serious(s, noscript)]
-        if judged_instruction and conf >= 0.6 or (serious and verdict_j is None):
+        if judged_instruction and conf >= 0.6 or (serious and not judge_known):
             return InputDecision(verdict="STRIPPED", clean_text=clean, severity="high", layer=1,
                                  rule_triggered="hidden_from_human_fed_to_ai",
                                  reason="The page fed the AI text that a person can't see; it was removed",
