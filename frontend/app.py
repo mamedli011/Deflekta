@@ -407,7 +407,7 @@ with st.sidebar:
                 result = call_run_agent(task, shield_on)
             events_path = field(result, "events_path")
             ss.events = load_jsonl(ROOT / events_path) if events_path else []
-            ss.source, ss.mode, ss.run_result, ss.animate = rel(ROOT / (events_path or "")), "LIVE", result, False
+            ss.source, ss.mode, ss.run_result, ss.animate = rel(ROOT / (events_path or "")), "LIVE", result, True
             if field(result, "error"):
                 ss.error = f"Agent reported an error: {field(result, 'error')}"
         except ImportError:
@@ -465,15 +465,21 @@ with tab_timeline:
                 "This works fully offline, so it's the safe choice for the demo.")
     else:
         runs = group_by_run(events)
-        stripped = sum(e.get("verdict") == "STRIPPED" for e in events)
-        blocked = sum(e.get("verdict") == "BLOCKED" for e in events)
-        st.markdown(
-            f'''<div class="tiles">
-              <div class="tile"><div class="k">Runs</div><div class="v">{len(runs)}</div></div>
-              <div class="tile"><div class="k">Events</div><div class="v">{len(events)}</div></div>
-              <div class="tile red"><div class="k">Hidden text stripped</div><div class="v">{stripped}</div></div>
-              <div class="tile red"><div class="k">Actions blocked</div><div class="v">{blocked}</div></div>
-            </div>''',
+        total_stripped = sum(e.get("verdict") == "STRIPPED" for e in events)
+        total_blocked = sum(e.get("verdict") == "BLOCKED" for e in events)
+
+        def tiles_html(nr, ne, ns, nb):
+            return (f'<div class="tiles">'
+                    f'<div class="tile"><div class="k">Runs</div><div class="v">{nr}</div></div>'
+                    f'<div class="tile"><div class="k">Events</div><div class="v">{ne}</div></div>'
+                    f'<div class="tile red"><div class="k">Hidden text stripped</div><div class="v">{ns}</div></div>'
+                    f'<div class="tile red"><div class="k">Actions blocked</div><div class="v">{nb}</div></div>'
+                    f'</div>')
+
+        tiles_slot = st.empty()
+        tiles_slot.markdown(
+            tiles_html(0, 0, 0, 0) if ss.animate
+            else tiles_html(len(runs), len(events), total_stripped, total_blocked),
             unsafe_allow_html=True,
         )
         armed = "armed" if shield_on else "off"
@@ -485,7 +491,9 @@ with tab_timeline:
         st.caption("Verdicts:  🟢 allowed   🟡 flagged / needs confirm   🔴 stripped / blocked. "
                    "Click any step to expand it.")
 
+        seen_runs = seen_events = seen_stripped = seen_blocked = 0
         for session_id, evs in runs.items():
+            seen_runs += 1
             shield_state = evs[0].get("shield_on")
             label = {True: "Shield ON", False: "Shield OFF"}.get(shield_state, "Shield ?")
             st.markdown(f'<div class="run-head">{esc(label)}<span class="sid">{esc(session_id)}</span></div>',
@@ -495,6 +503,11 @@ with tab_timeline:
             for i, ev in enumerate(evs):
                 if ss.animate:
                     time.sleep(REPLAY_DELAY)
+                    seen_events += 1
+                    seen_stripped += ev.get("verdict") == "STRIPPED"
+                    seen_blocked += ev.get("verdict") == "BLOCKED"
+                    tiles_slot.markdown(tiles_html(seen_runs, seen_events, seen_stripped, seen_blocked),
+                                        unsafe_allow_html=True)
                 with st.expander(row_label(ev)):
                     show_event_details(ev, key=f"{session_id}_{i}")
             rr = ss.run_result if (ss.run_result is not None
@@ -502,6 +515,9 @@ with tab_timeline:
             hijacked, kind, src = run_outcome(evs, rr)
             banner_slot.markdown(banner_html(hijacked, kind, evs), unsafe_allow_html=True)
             chain_slot.markdown(chain_html(evs), unsafe_allow_html=True)
+        if ss.animate:
+            tiles_slot.markdown(tiles_html(len(runs), len(events), total_stripped, total_blocked),
+                                unsafe_allow_html=True)
         ss.animate = False
 
 with tab_score:
