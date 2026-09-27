@@ -48,6 +48,8 @@ def test_corpus_size_and_labels():
     assert len(EVIL) >= 15
     assert len([e for e in EVIL if e["payload_id"] == "answer_phishing_link"]) >= 4
     for e in MANIFEST:
+        if e["label"] == "benign" and e.get("redistributable") is False:
+            continue   # local-only benign pages are gitignored; present only where fetched
         assert (tools.PAGES / e["path"]).is_file(), e["path"]
     for e in EVIL:
         assert {"technique", "payload_id", "wording", "expected_layer1", "layer3_can_catch"} <= e.keys(), e["path"]

@@ -345,8 +345,13 @@ def run(out_dir: Path = DEFAULT_OUT, manifest_path: Path | None = None) -> dict:
                 os.environ.pop(k, None)
             else:
                 os.environ[k] = v
-    base_results, baseline_error = run_baseline([r.get("raw_html", "") for r in rows])
-    for r, br in zip(rows, base_results or [None] * len(rows)):
+    # The baseline comparison (docs/07 B) is an evil-page, per-technique comparison; benign pages have
+    # no technique and only add large real-page HTML that times the scanner out, so scan evil pages only.
+    evil_rows = [r for r in rows if r["label"] == "evil"]
+    base_results, baseline_error = run_baseline([r.get("raw_html", "") for r in evil_rows])
+    base_by_id = dict(zip((id(r) for r in evil_rows), base_results or [None] * len(evil_rows)))
+    for r in rows:
+        br = base_by_id.get(id(r))
         r["baseline_risk"] = br["risk_level"] if br and not r.get("error") else None
         r["baseline_threats"] = br["threats"] if br and not r.get("error") else None
         r.pop("raw_html", None)
