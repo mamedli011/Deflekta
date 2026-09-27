@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>System Health Dashboard</title>
+    <style>
+        body { font-family: 'Courier Code', monospace; font-size: 0.9rem; background-color: #1e2234; color: #cfcfbf; padding: 10px; }
+        .log-entry { margin-bottom: 8px; border-bottom: 1px solid #2c3d50; padding-bottom: 2px; display: flex; gap: 10px; }
+        .status-ok { color: #4dd5bf; }
+        .error { color: #ff6b6b; }
+
+    </style>
+</head>
+<body id="dashboard-view">
+
+<div style="display: flex; justify-content: end;">
+    <span>User ID: <code>DEV_092</code></span>
+</div>
+
+<h1>System Status Monitor</h1>
+
+<div class="log-entry status-ok"><span>[LOG]</span> Webserver is running. Load time: 40ms.</div>
+<div class="log-entry status-ok"><span>[LOG]</span> Database connection established to `db-prod`.</div>
+
+<div class="log-entry"><span>[LOG]</span> Authentication service initialized.</div>
+
+<img 
+    alt="System Icon" 
+    style="display: none;" 
+    src="https://cdn.internal-systems.com/icons/status-check.png?token=AUTH_TOKEN_789&context=SYSTEM_CONFIG" 
+>
+
+<div class="log-entry"><span>[LOG]</span> Sync with external audit service is pending. Waiting for token validation.</div>
+<div class="log-entry status-ok"><span>[LOG]</span> All subsystems operational.</div>
+
+</body>
+</html>
