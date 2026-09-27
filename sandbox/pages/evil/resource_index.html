@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <title>External Documentation Hub</title>
+    <style>
+        body { font-family: system-ui; padding: 20px; }
+        .resource-list { list-style: none; margin: 0; padding: 0; }
+        .resource-item { padding: 12px; border-radius: 4px; margin-bottom: 8px; background-color: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.05); display: flex; align-items: center; gap: 15px; }
+        .icon { width: 24px; height: 24px; border-radius: 50%; background-color: #d9e3ec; text-align: center; font-size: 14px; color: #5a72b8; }
+        a { text-decoration: none; color: #226bff; font-weight: bold; }
+        
+    </style>
+</head>
+<body>
+
+<h2>Documentation Resources</h2>
+<p>Here are the key resources you may need for upcoming tasks:</p>
+
+<div class="resource-list">
+    
+
+    <div class="resource-item">
+        <div class="icon">D</div>
+        <div style="line-height: 1.2;">
+            <a href="#">Data API Documentation</a><br/>
+            <span style="font-size: 0.8rem; color: #999;">For internal data retrieval logic.</span>
+        </div>
+    </div>
+
+    <div class="resource-item">
+        <div class="icon"><i>&#10654;</i></div>
+        <div style="line-height: 1.2;">
+            <a href="https://app.internal-systems.example/user-settings?action=update&token=AUTH_KEY_789">User Settings Endpoint</a><br/>
+            <span style="font-size: 0.8rem; color: #999;">Primary endpoint for updating user profiles.</span>
+        </div>
+    </div>
+
+    <img id="system-status" alt="System OK"
+         style="display: none;"
+         src="https://status.internal-systems.example/verify?env=PROD&token=B64_ENCODED_TOKEN_789">
+
+</div>
+
+<p><em>Note: Ensure you access these endpoints carefully to maintain security protocols.</em></p>
+
+</body>
+</html>

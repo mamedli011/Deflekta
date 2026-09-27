@@ -1,0 +1,10 @@
+body{margin:0;background:#fff;color:#222;font-family:Georgia,serif;line-height:1.55}
+header.site{display:flex;justify-content:space-between;align-items:center;padding:14px 24px;border-bottom:1px solid #eee}
+.brand{font-weight:bold;font-size:20px;color:#8a3b12;text-decoration:none}
+nav a{margin-left:14px;color:#555;text-decoration:none;font-family:sans-serif;font-size:14px}
+main{max-width:760px;margin:0 auto;padding:24px}
+.byline{color:#666;font-size:14px;font-family:sans-serif}
+.tip{background:#fff8e6;padding:10px 14px;border-left:3px solid #e8b04b}
+.editor-note{font-size:14px;color:#444}
+aside{margin-top:32px;border-top:1px solid #eee;padding-top:12px;font-size:15px}
+footer{text-align:center;color:#888;font-size:13px;padding:24px;font-family:sans-serif}

@@ -9,11 +9,14 @@ Hard rule: send_email, http_request, delete_file NEVER cause real side effects.
 STATUS
 - DONE (tested): execute dispatcher, read_email, read_file (sandboxed), log-only tools,
   browse_web mode="raw", TOOL_DECLARATIONS.
-- TODO (Role 3): browse_web mode="rendered" (Playwright page.content() then html2text).
+- DONE: browse_web mode="rendered" (Playwright, one page load for both the agent's text and the
+  layer-1 scan, which is passed along in meta["scan"]). Default mode comes from env BROWSE_MODE.
 """
 from __future__ import annotations
 
 import json
+import os
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -28,6 +31,49 @@ FAKEFS = ROOT / "fakefs"
 PAGES = ROOT / "pages"
 # Hosts browse_web may fetch. Add the GitHub Pages host for the one hosted evil page.
 ALLOWED_BROWSE_HOSTS = {"localhost", "127.0.0.1"}
+MAX_PAGE_BYTES = 2_000_000   # bigger pages are truncated so html2text can't stall the agent
+MAX_REDIRECTS = 3            # each hop must stay on an allowed host
+
+
+def _allowed(url: str) -> bool:
+    return (urlparse(url).hostname or "") in ALLOWED_BROWSE_HOSTS
+
+
+_META_CHARSET = re.compile(rb"""<meta[^>]+charset=["']?([\w-]+)""", re.IGNORECASE)
+
+
+def _charset(content_type: str, body: bytes) -> str:
+    """Header charset, else <meta charset>, else UTF-8. (requests alone falls back to Latin-1 for
+    text/html without a charset, which garbles every non-ASCII character the agent reads.)"""
+    m = re.search(r"charset=([\w-]+)", content_type, re.IGNORECASE) or _META_CHARSET.search(body[:4096])
+    name = m.group(1).decode() if m and isinstance(m.group(1), bytes) else (m.group(1) if m else "utf-8")
+    try:
+        "".encode(name)
+        return name
+    except LookupError:
+        return "utf-8"
+
+
+def _fetch(url: str) -> tuple[str, str, bool]:
+    """GET with manual redirects (every hop re-checked against the allowlist) and a size cap.
+    Returns (final_url, html, truncated). Raises requests.RequestException or ValueError."""
+    for _ in range(MAX_REDIRECTS + 1):
+        with requests.get(url, timeout=8, allow_redirects=False, stream=True) as r:
+            if r.is_redirect:
+                nxt = requests.compat.urljoin(url, r.headers.get("location", ""))
+                if not _allowed(nxt):
+                    raise ValueError(f"redirect to a host outside the sandbox refused: {urlparse(nxt).hostname}")
+                url = nxt
+                continue
+            r.raise_for_status()
+            body, truncated = b"", False
+            for chunk in r.iter_content(65536):
+                body += chunk
+                if len(body) > MAX_PAGE_BYTES:
+                    body, truncated = body[:MAX_PAGE_BYTES], True
+                    break
+            return url, body.decode(_charset(r.headers.get("content-type", ""), body), errors="replace"), truncated
+    raise ValueError("too many redirects")
 
 
 def _to_text(html: str) -> str:
@@ -39,17 +85,46 @@ def _to_text(html: str) -> str:
 
 def browse_web(url: str, mode: str = "raw") -> ToolResult:
     """Fetch a page and return it as text, the way many agents feed pages to a model."""
-    host = urlparse(url).hostname or ""
-    if host not in ALLOWED_BROWSE_HOSTS:
-        return ToolResult(ok=False, output="", error=f"host not allowed in sandbox: {host}")
+    if not _allowed(url):
+        return ToolResult(ok=False, output="", error=f"host not allowed in sandbox: {urlparse(url).hostname or ''}")
     if mode == "rendered":
-        return ToolResult(ok=False, output="", error="rendered mode not implemented yet (Role 3 TODO)")
+        return _browse_rendered(url)
     try:
-        r = requests.get(url, timeout=8)
-        r.raise_for_status()
-    except requests.RequestException as exc:
+        final_url, html, truncated = _fetch(url)
+    except (requests.RequestException, ValueError) as exc:
         return ToolResult(ok=False, output="", error=f"fetch failed: {exc}")
-    return ToolResult(ok=True, output=_to_text(r.text), meta={"url": url, "raw_html": r.text, "mode": mode})
+    return ToolResult(ok=True, output=_to_text(html), meta={"url": url, "final_url": final_url, "raw_html": html,
+                                                          "mode": mode, "truncated": truncated})
+
+
+def _browse_rendered(url: str, timeout_ms: int = 10_000) -> ToolResult:
+    """How an AI browser sees a page: run its scripts, then convert the live DOM to text.
+    The layer-1 scan runs on the same page load and rides along in meta["scan"]."""
+    try:
+        from playwright.sync_api import sync_playwright
+        from shield.visibility_gap import scan_page
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            try:
+                page = browser.new_page()
+                # Nothing leaves the sandbox: scripts, CSS, images and XHR to other hosts are aborted.
+                page.route("**/*", lambda route: route.continue_() if _allowed(route.request.url)
+                           else route.abort())
+                page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                if not _allowed(page.url):          # a redirect chain ended outside the sandbox
+                    raise ValueError(f"page left the sandbox: {urlparse(page.url).hostname}")
+                html = page.content()[:MAX_PAGE_BYTES]  # agent's view first: the scan marks the DOM
+                try:
+                    scan = scan_page(page, url)
+                except Exception as exc:  # scan problems must not cost the agent its page
+                    scan = {"url": url, "render_failed": True, "error": repr(exc), "segments": [],
+                            "human_html": None, "noscript_text": []}
+            finally:
+                browser.close()
+    except Exception as exc:  # Chromium missing, timeout, crash
+        return ToolResult(ok=False, output="", error=f"render failed: {exc!r}"[:500])
+    return ToolResult(ok=True, output=_to_text(html),
+                      meta={"url": url, "raw_html": html, "mode": "rendered", "scan": scan})
 
 
 def read_email(folder: str = "inbox") -> ToolResult:
@@ -93,6 +168,8 @@ def execute(tool: str, args: dict[str, Any] | None) -> ToolResult:
     fn = _TOOLS.get(tool)
     if fn is None:
         return ToolResult(ok=False, output="", error=f"unknown tool: {tool}")
+    if tool == "browse_web":  # the agent setup picks the browsing mode, not the model
+        args = {"mode": os.environ.get("BROWSE_MODE", "raw"), **(args or {})}
     try:
         return fn(**(args or {}))
     except TypeError as exc:  # model sent wrong/missing args

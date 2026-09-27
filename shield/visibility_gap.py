@@ -198,25 +198,35 @@ def noscript_text(html: str) -> list[str]:
     return out
 
 
+def scan_page(page, url: str) -> dict:
+    """Layer-1 scan of an already-loaded Playwright page. Used by scan_url and by
+    sandbox browse_web(mode="rendered"), so the agent's text and the scan come from ONE page load
+    (a cloaking server can't show the scanner one page and the agent another).
+    Call it AFTER reading page.content() for the agent: it marks hidden elements in the DOM."""
+    raw = page.evaluate(WALK_JS)          # also marks hidden elements
+    human_html = page.evaluate(HUMAN_HTML_JS)
+    return _result(url, raw, human_html, page.content())
+
+
 def scan_url(url: str, timeout_ms: int = 10_000) -> dict:
     """Render `url` and return hidden segments. Never raises: returns render_failed=True instead."""
-    result: dict = {"url": url, "render_failed": False, "segments": [], "human_html": None,
-                    "noscript_text": []}
     try:
         from playwright.sync_api import sync_playwright  # lazy, so tests don't need it
         with sync_playwright() as p:
             browser = p.chromium.launch()
-            page = browser.new_page()
-            page.goto(url, wait_until="networkidle", timeout=timeout_ms)
-            raw = page.evaluate(WALK_JS)          # also marks hidden elements
-            human_html = page.evaluate(HUMAN_HTML_JS)
-            html = page.content()
-            browser.close()
+            try:
+                page = browser.new_page()
+                page.goto(url, wait_until="networkidle", timeout=timeout_ms)
+                return scan_page(page, url)
+            finally:
+                browser.close()
     except Exception as exc:  # timeouts, DNS, crashes: never crash the demo
-        result["render_failed"] = True
-        result["error"] = repr(exc)
-        return result
+        return {"url": url, "render_failed": True, "error": repr(exc), "segments": [],
+                "human_html": None, "noscript_text": []}
 
+
+def _result(url: str, raw: list[dict], human_html: str, html: str) -> dict:
+    result: dict = {"url": url, "render_failed": False}
     segs = [HiddenSegment(r["text"], r["technique"], r["selector"], _severity(r), r["all_techniques"])
             for r in raw]
     segs += html_comments(html)
