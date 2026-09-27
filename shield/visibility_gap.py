@@ -97,6 +97,14 @@ WALK_JS = r"""
     }
     return true;
   }
+  // Elements with no text of their own whose attributes still reach the agent: html2text writes
+  // <img src> as ![alt](src) and an empty <a href> as [](href). Returns that content, or ''.
+  function attrContent(el) {
+    const tag = el.tagName.toUpperCase();
+    if (tag === 'IMG' && el.getAttribute('src')) return ((el.getAttribute('alt') || '') + ' ' + el.getAttribute('src')).trim();
+    if (tag === 'A' && el.getAttribute('href') && !el.textContent.trim()) return el.getAttribute('href').trim();
+    return '';
+  }
 
   const all = document.body ? document.body.querySelectorAll('*') : [];
   for (const el of all) {
@@ -104,7 +112,12 @@ WALK_JS = r"""
     let text = '';
     for (const n of el.childNodes) if (n.nodeType === 3) text += n.textContent;
     text = text.replace(/\s+/g, ' ').trim();
-    if (text.length < 3) continue;
+    let hasText = true;
+    if (text.length < 3) {
+      text = attrContent(el);          // a non-text element that still feeds the agent (e.g. a hidden image)
+      hasText = false;
+      if (text.length < 3) continue;
+    }
 
     const reasons = [];
     let opacity = 1;
@@ -116,16 +129,24 @@ WALK_JS = r"""
     const cs = getComputedStyle(el);
     if (cs.visibility === 'hidden' || cs.visibility === 'collapse') reasons.push('visibility_hidden');
     if (opacity < 0.05) reasons.push('opacity_zero');
-    if (parseFloat(cs.fontSize) < 2) reasons.push('tiny_font');
+    if (hasText && parseFloat(cs.fontSize) < 2) reasons.push('tiny_font');
 
     if (!reasons.includes('display_none')) {
       const r = el.getBoundingClientRect();
-      if (isOffscreen(el, r)) reasons.push('offscreen');
-      if ((r.width < 2 || r.height < 2) && cs.overflow === 'hidden') reasons.push('clipped');
+      // A non-text element's box can be 0x0 just because its image didn't load (the scanner blocks
+      // external hosts). Such a box says nothing about the page hiding it: only a position strictly
+      // outside the document counts then, and the tiny-box clip rule is skipped.
+      const sized = hasText || (r.width > 0 && r.height > 0);
+      const x = r.left + window.scrollX, y = r.top + window.scrollY;
+      const outside = x + r.width < 0 || y + r.height < 0 || x >= docW || y >= docH;
+      if (isOffscreen(el, r) && (sized || outside)) reasons.push('offscreen');
+      if (sized && (r.width < 2 || r.height < 2) && cs.overflow === 'hidden') reasons.push('clipped');
       if (cs.clipPath && cs.clipPath !== 'none' && /inset\(\s*(50%|100%)/.test(cs.clipPath)) reasons.push('clipped');
       if (cs.clip && /rect\(\s*0(px)?[ ,]+0(px)?[ ,]+0(px)?[ ,]+0(px)?\s*\)/.test(cs.clip)) reasons.push('clipped');
-      const fg = parseRGB(cs.color), bg = effectiveBg(el);
-      if (fg && bg && contrast(fg, bg) < 1.5) reasons.push('low_contrast');
+      if (hasText) {                       // colour contrast is about rendered text
+        const fg = parseRGB(cs.color), bg = effectiveBg(el);
+        if (fg && bg && contrast(fg, bg) < 1.5) reasons.push('low_contrast');
+      }
     }
     if (reasons.length) {
       el.setAttribute('data-iis-hidden', reasons[0]);
