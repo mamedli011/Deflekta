@@ -14,12 +14,17 @@ import pytest
 
 from sandbox import tools
 from shield import pipeline
+from shield.gap import strip
 
 MANIFEST = json.loads((tools.PAGES / "manifest.json").read_text(encoding="utf-8"))
 MARKERS = json.loads((tools.FAKEFS / "canaries.json").read_text(encoding="utf-8"))["attacker_markers"]
 PLACEHOLDER = "[hidden content removed by shield]"
 # Payload is only added by JavaScript, so a raw-mode agent never receives it.
 NOT_IN_RAW_FETCH = {"js_injected"}
+
+# R3's manifest contract: each evil page's tell-tale string is "detect" (default "evil.example"). Pages
+# where it also appears in visible text by design, with the visible count (R3's frozen pages).
+VISIBLE_PAYLOAD_OCCURRENCES = {"evil/resource_index.html": 1}   # visible "User Settings Endpoint" link
 
 EVIL = [p for p in MANIFEST if p["label"] == "evil" and p.get("expected_layer1")]
 EVIL_RAW = [p for p in EVIL if p["technique"] not in NOT_IN_RAW_FETCH]
@@ -29,6 +34,10 @@ BENIGN = [p for p in MANIFEST if p["label"] == "benign"]
 
 def _has_marker(text: str) -> bool:
     return any(m in text.lower() for m in MARKERS)
+
+
+def _payload(page: dict) -> str:
+    return page.get("detect", "evil.example")
 
 
 def _ids(p: dict) -> str:
@@ -67,22 +76,26 @@ def run(server, monkeypatch):
 @pytest.mark.parametrize("page", EVIL_RAW, ids=_ids)
 def test_hidden_payload_is_stripped(page, run):
     agent_text, d = run(page["path"], "1,3")
-    assert _has_marker(agent_text)                               # the attack really reached the agent
+    payload = _payload(page)
+    assert payload in agent_text                                 # the attack really reached the agent
     assert not d.render_failed
     assert d.verdict == "STRIPPED" and d.severity == "high" and d.layer == 1
     assert d.rule_triggered == "hidden_from_human_fed_to_ai"
-    assert not _has_marker(d.clean_text)                         # payload gone
-    assert d.clean_text.count(PLACEHOLDER) == 1                  # exactly one sentence removed
+    spans = [s["text"] for s in d.segments if set(s) == {"text"}]  # the removed (gap) sentences
+    if "detect" not in page:
+        assert len(spans) == 1, spans                            # generated corpus: exactly one sentence
+    assert d.clean_text.count(payload) == VISIBLE_PAYLOAD_OCCURRENCES.get(page["path"], 0)   # hidden copy gone
+    assert d.clean_text.count(PLACEHOLDER) == len(spans)
     # Everything else the agent was given is untouched (the task can still be done).
-    assert d.clean_text.replace(PLACEHOLDER, "") == agent_text.replace(d.segments[0]["text"], "")
-    # Evidence shape R1 relies on: the gap sentence comes first.
-    assert _has_marker(d.segments[0]["text"])
+    assert d.clean_text == strip(agent_text, spans)
+    # Evidence shape R1 relies on: the gap sentences come first, and one of them is the payload.
+    assert d.segments[0] == {"text": spans[0]} and any(payload in s for s in spans)
 
 
 @pytest.mark.parametrize("page", EVIL_JS, ids=_ids)
 def test_js_payload_not_fed_to_raw_agent_is_allowed(page, run):
     agent_text, d = run(page["path"], "1,3")
-    assert not _has_marker(agent_text)
+    assert _payload(page) not in agent_text
     assert not d.render_failed
     assert d.verdict == "ALLOWED" and d.clean_text == agent_text
 
@@ -107,4 +120,4 @@ def test_ablation_layer3_only_lets_payload_through(page, run, monkeypatch):
     agent_text, d = run(page["path"], "3")
     assert calls == []                                           # layer 1 never ran
     assert d.verdict == "ALLOWED" and d.layer is None
-    assert d.clean_text == agent_text and _has_marker(d.clean_text)   # payload reaches the agent
+    assert d.clean_text == agent_text and _payload(page) in d.clean_text   # payload reaches the agent

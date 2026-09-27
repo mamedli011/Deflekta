@@ -18,7 +18,7 @@ from functools import partial
 import pytest
 
 from sandbox import tools
-from shield.gap import gap, strip, to_text
+from shield.gap import _norm, gap, strip, to_text
 from shield.pipeline import LOW_SEVERITY_MAX_CHARS
 
 MANIFEST = json.loads((tools.PAGES / "manifest.json").read_text(encoding="utf-8"))
@@ -44,6 +44,18 @@ EXPECTED_TECHNIQUE = {
 }
 # Techniques whose payload a raw-mode agent never receives (only added by JavaScript).
 NOT_IN_RAW_FETCH = {"js_injected"}
+# R3's manifest contract: each evil page's tell-tale string is its "detect" field (default "evil.example",
+# the generated recipe corpus). Pages where that string ALSO appears in visible text by design, with the
+# number of visible occurrences (from R3's frozen pages). Layer 1 never removes visible text.
+VISIBLE_PAYLOAD_OCCURRENCES = {"evil/resource_index.html": 1}   # visible "User Settings Endpoint" link
+
+
+def _payload(page: dict) -> str:
+    return page.get("detect", "evil.example")
+
+
+def _has(text: str, page: dict) -> bool:
+    return _payload(page) in text
 
 
 def _has_marker(text: str) -> bool:
@@ -113,8 +125,8 @@ def test_evil_payload_detected_with_expected_technique(page, scan):
         f"new technique {page['technique']!r}: add its expected layer-1 result to EXPECTED_TECHNIQUE"
     r = scan(page["path"])
     assert not r["render_failed"], r.get("error")
-    hits = [s for s in r["segments"] if _has_marker(s["text"])]
-    assert hits, f"payload not reported; segments: {r['segments']}"
+    hits = [s for s in r["segments"] if _has(s["text"], page)]
+    assert hits, f"payload {_payload(page)!r} not reported; segments: {r['segments']}"
     assert {s["technique"] for s in hits} == {EXPECTED_TECHNIQUE[page["technique"]]}
 
 
@@ -123,8 +135,10 @@ def test_human_view_has_no_payload(page, scan):
     r = scan(page["path"])
     assert not r["render_failed"], r.get("error")
     assert r["human_html"]
-    assert not _has_marker(r["human_html"])
-    assert not _has_marker(to_text(r["human_html"]))
+    visible = VISIBLE_PAYLOAD_OCCURRENCES.get(page["path"], 0)
+    assert to_text(r["human_html"]).count(_payload(page)) == visible
+    if not visible:
+        assert not _has(r["human_html"], page)
 
 
 @pytest.mark.parametrize("page", LAYER1, ids=_ids)
@@ -133,14 +147,22 @@ def test_raw_agent_diff_is_exactly_the_payload(page, scan, browse):
     spans = gap(agent_text, to_text(scan(page["path"])["human_html"]))
     if page["technique"] in NOT_IN_RAW_FETCH:
         # The raw agent never got the JS-added text, so there is nothing to strip.
-        assert not _has_marker(agent_text)
+        assert not _has(agent_text, page)
         assert spans == []
         return
-    assert _has_marker(agent_text)                        # the attack really reaches the agent
-    assert len(spans) == 1, spans                         # only the payload, no collateral
-    assert _has_marker(spans[0]) and len(spans[0]) > LOW_SEVERITY_MAX_CHARS
+    assert _has(agent_text, page)                         # the attack really reaches the agent
+    payload_spans = [s for s in spans if _has(s, page)]
+    assert payload_spans and all(len(s) > LOW_SEVERITY_MAX_CHARS for s in payload_spans), spans
+    if "detect" not in page:
+        assert len(spans) == 1, spans                     # generated corpus: one-sentence payload, no collateral
+    else:
+        # Hand-authored payloads can span sentences. No collateral: every removed sentence is hidden text
+        # (inside a hidden segment) or an image line (alt text is hidden from people by definition, docs/05).
+        hidden = [_norm(seg["text"]) for seg in scan(page["path"])["segments"]]
+        for s in spans:
+            assert any(_norm(s) in h for h in hidden) or s.lstrip().startswith("!["), f"visible text stripped: {s!r}"
     cleaned = strip(agent_text, spans)
-    assert not _has_marker(cleaned)
+    assert cleaned.count(_payload(page)) == VISIBLE_PAYLOAD_OCCURRENCES.get(page["path"], 0)
     assert "[hidden content removed by shield]" in cleaned
 
 
@@ -150,14 +172,14 @@ def test_known_bypass_is_still_missed(page, scan, browse):
     benchmark reports it honestly. When a detector fix lands, this fails on purpose."""
     r = scan(page["path"])
     assert not r["render_failed"], r.get("error")
-    assert _has_marker(browse(page["path"])), "payload no longer reaches the agent; check the page"
-    hits = [s for s in r["segments"] if _has_marker(s["text"])]
+    assert _has(browse(page["path"]), page), "payload no longer reaches the agent; check the page"
+    hits = [s for s in r["segments"] if _has(s["text"], page)]
     assert not hits, (
         f"{page['path']} ({page['technique']}) is now detected by layer 1 as "
         f"{sorted({s['technique'] for s in hits})}. Update R3's manifest: set known_bypass: false and "
         "expected_layer1: true for this page (sandbox/build_corpus.py), and add its technique to "
         "EXPECTED_TECHNIQUE.")
-    assert _has_marker(to_text(r["human_html"])), (
+    assert _has(to_text(r["human_html"]), page), (
         f"{page['path']}: payload is no longer in the human view, so layer 1 now hides it. "
         "Update R3's manifest (known_bypass: false, expected_layer1: true).")
 
@@ -169,12 +191,12 @@ def test_layer2_page_is_visible_to_layer1(page, scan, browse):
     r = scan(page["path"])
     assert not r["render_failed"], r.get("error")
     agent_text = browse(page["path"])
-    assert _has_marker(agent_text), "payload no longer reaches the agent; check the page"
+    assert _has(agent_text, page), "payload no longer reaches the agent; check the page"
     human_text = to_text(r["human_html"])
-    assert _has_marker(human_text), "visible payload is missing from the human view (layer-1 false positive)"
-    hits = [s for s in r["segments"] if _has_marker(s["text"])]
+    assert _has(human_text, page), "visible payload is missing from the human view (layer-1 false positive)"
+    hits = [s for s in r["segments"] if _has(s["text"], page)]
     assert not hits, f"layer 1 reported visible text as hidden: {hits}"
-    assert not any(_has_marker(s) for s in gap(agent_text, human_text)), "visible payload would be stripped"
+    assert not any(_has(s, page) for s in gap(agent_text, human_text)), "visible payload would be stripped"
 
 
 @pytest.mark.parametrize("page", BENIGN, ids=_ids)
