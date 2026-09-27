@@ -300,3 +300,57 @@ def test_section_c_copies_recorded_metrics(tmp_path, monkeypatch):
     assert f"precision {inj['precision']}, recall {inj['recall']}, F1 {inj['f1']}" in md
     assert f"false-positive rate {ben['false_positive_rate']}" in md
     assert "confidence >= 0.8" in md and "Partial run" not in md
+
+
+# ---- prompt provenance: results from different judge prompts are never mixed ----
+
+def test_prompt_fingerprint_is_deterministic_sha256_of_the_prompt():
+    import hashlib
+    import shield.judge as judge_mod
+    fp = je.prompt_fingerprint()
+    assert fp == je.prompt_fingerprint() == je.prompt_fingerprint(judge_mod.JUDGE_PROMPT)
+    assert fp == "sha256:" + hashlib.sha256(judge_mod.JUDGE_PROMPT.encode("utf-8")).hexdigest()
+    assert len(fp) == len("sha256:") + 64
+
+
+def test_changed_prompt_changes_the_fingerprint(monkeypatch):
+    import shield.judge as judge_mod
+    before = je.prompt_fingerprint()
+    assert je.prompt_fingerprint("prompt A") != je.prompt_fingerprint("prompt B")
+    monkeypatch.setattr(judge_mod, "JUDGE_PROMPT", judge_mod.JUDGE_PROMPT + " ")   # even one character
+    assert je.prompt_fingerprint() != before
+
+
+def test_fingerprint_recorded_in_output_and_plan(tmp_path, monkeypatch, capsys):
+    doc = je.run(tmp_path / "j.json", n=4, seed=1, judge_fn=honest_judge(), fetch=fake_fetch())
+    saved = json.loads((tmp_path / "j.json").read_text(encoding="utf-8"))
+    assert doc["config"]["judge_prompt_sha256"] == saved["config"]["judge_prompt_sha256"] == je.prompt_fingerprint()
+    monkeypatch.setattr(je, "fetch_parquet", fake_fetch())
+    assert je.main(["--plan", "--n", "4"], load_env=False) == 0
+    assert json.loads(capsys.readouterr().out)["config"]["judge_prompt_sha256"] == je.prompt_fingerprint()
+
+
+def test_resume_with_same_prompt_is_accepted(tmp_path):
+    out = tmp_path / "j.json"
+    je.run(out, n=4, seed=1, judge_fn=honest_judge(), fetch=fake_fetch())
+    calls = []
+    doc = je.run(out, n=4, seed=1, judge_fn=honest_judge(calls), fetch=fake_fetch())
+    assert calls == [] and doc["finished_calls"] == doc["planned_calls"] == 8      # nothing re-asked
+
+
+def test_resume_with_a_different_prompt_is_rejected(tmp_path, monkeypatch):
+    import shield.judge as judge_mod
+    out = tmp_path / "j.json"
+    je.run(out, n=4, seed=1, judge_fn=honest_judge(), fetch=fake_fetch())
+    before = out.read_text(encoding="utf-8")
+    monkeypatch.setattr(judge_mod, "JUDGE_PROMPT", judge_mod.JUDGE_PROMPT + "\n(revised)")
+    calls = []
+    with pytest.raises(SystemExit, match="different configuration"):
+        je.run(out, n=4, seed=1, judge_fn=honest_judge(calls), fetch=fake_fetch())
+    assert calls == [] and out.read_text(encoding="utf-8") == before              # old results untouched
+
+
+def test_fingerprint_holds_no_secret(tmp_path, monkeypatch):
+    monkeypatch.setenv("GEMINI_API_KEY", SECRET)
+    doc = je.run(tmp_path / "j.json", n=2, seed=1, judge_fn=honest_judge(), fetch=fake_fetch())
+    assert SECRET not in json.dumps(doc["config"]) and SECRET not in (tmp_path / "j.json").read_text(encoding="utf-8")

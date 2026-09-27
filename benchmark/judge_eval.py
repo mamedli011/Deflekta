@@ -208,12 +208,22 @@ def _pkg(name: str) -> str | None:
         return None
 
 
+def prompt_fingerprint(prompt: str | None = None) -> str:
+    """Stable identity of the judge prompt: sha256 of its exact UTF-8 text (default: the current
+    shield.judge.JUDGE_PROMPT). Results from different prompts must never be mixed."""
+    if prompt is None:
+        from shield import judge as j
+        prompt = j.JUDGE_PROMPT
+    return "sha256:" + hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+
+
 def config(n: int, seed: int) -> dict:
-    """What defines a run. A resumed run must match this exactly."""
+    """What defines a run. A resumed run must match this exactly (including the judge prompt)."""
     from shield import judge as j
     return {"seed": seed, "n_per_dataset": n, "visible_flag_confidence": VISIBLE_FLAG_CONFIDENCE,
             "judge_input": "judge(text, []) -- text as visible page content, no hidden segments",
             "judge_model": os.environ.get("JUDGE_MODEL"),
+            "judge_prompt_sha256": prompt_fingerprint(),
             "judge": {"timeout_ms": j.JUDGE_TIMEOUT_MS, "max_visible_chars": j.MAX_VISIBLE_CHARS,
                       "response_schema_fields": list(j.RESPONSE_SCHEMA["required"]), "retries": 0},
             "datasets": {k: {"id": v["id"], "revision": v["revision"], "splits": list(v["splits"]),
