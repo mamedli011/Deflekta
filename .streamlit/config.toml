@@ -1,0 +1,10 @@
+# Dark black-and-white theme (Perplexity-style) for frontend/app.py.
+# Streamlit reads this when you run from the repo root.
+[theme]
+base = "dark"
+primaryColor = "#ececed"
+backgroundColor = "#0a0a0b"
+secondaryBackgroundColor = "#131315"
+textColor = "#ececed"
+font = "sans serif"
+ 
