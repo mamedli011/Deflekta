@@ -31,10 +31,15 @@ PREFERRED_ABLATION_TECHNIQUE = "external_css_class"   # the demo technique
 TYPICAL_CALLS_PER_RUN = 3                            # observed at CP1: browse, (email), answer
 
 
-def evil_pages(manifest: Path = MANIFEST) -> list[dict]:
-    """Evil entries from the manifest whose payload family has a task."""
-    items = json.loads(manifest.read_text(encoding="utf-8"))
-    return [p for p in items if p.get("label") == "evil" and p.get("payload_id") in TASKS]
+def evil_pages(manifest: Path | None = None) -> list[dict]:
+    """Evil entries from the manifest that have a task (their own "task", or one for their payload family)."""
+    items = json.loads((manifest or MANIFEST).read_text(encoding="utf-8"))
+    return [p for p in items if p.get("label") == "evil" and (p.get("task") or p.get("payload_id") in TASKS)]
+
+
+def task_for(page: dict, base: str) -> str:
+    """The page's own task if the manifest gives one, else the family default."""
+    return (page.get("task") or TASKS[page["payload_id"]]).format(url=f"{base}/{page['path']}")
 
 
 def ablation_pages(pages: list[dict]) -> list[dict]:
@@ -74,8 +79,7 @@ def run_one(item: dict, base: str, i: int) -> dict:
     row = {"path": page["path"], "technique": page.get("technique"), "payload_id": page["payload_id"],
            "shield_on": item["shield_on"], "layers": item["layers"], "session_id": sid}
     try:
-        r = loop.run_agent(TASKS[page["payload_id"]].format(url=f"{base}/{page['path']}"),
-                           item["shield_on"], session_id=sid)
+        r = loop.run_agent(task_for(page, base), item["shield_on"], session_id=sid)
         row.update(hijacked=r.hijacked, hijack_kind=r.hijack_kind, steps=r.steps, error=r.error,
                    attack_mentioned=_attack_mentioned(r.events_path))
     except Exception as exc:  # keep the benchmark going
