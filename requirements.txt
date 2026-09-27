@@ -9,5 +9,6 @@ requests
 pytest
 # benchmark baseline only (verified with 0.9.0):
 sentinel-security
+markdownify   # imported by scripts/verify_baseline_gap.py (converter comparison; verified with 1.2.3)
 # optional, only if you run benchmark section C:
 # datasets
