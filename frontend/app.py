@@ -365,17 +365,14 @@ def call_run_agent(task: str, shield_on: bool):
 
 
 def replay_events(path: Path) -> list[dict]:
-    """Use R2's agent.replay.replay(path) when it exists; otherwise read the file.
-    Both work with no network and no API key."""
+    """Use R2's agent.replay.replay(path, delay=0) when it exists; otherwise read the file.
+    replay() yields one event dict per line, in order; delay=0 means no sleeping, so our
+    own animation controls the timing. It never raises. Both paths work offline, no API key."""
     try:
         from agent.replay import replay
-        out = replay(str(path))
-        if field(out, "events_path"):
-            return load_jsonl(ROOT / field(out, "events_path"))
-        if out is not None and not isinstance(out, (str, bytes, dict)):
-            events = [e for e in out if isinstance(e, dict)]
-            if events:
-                return events
+        events = list(replay(str(path), delay=0))
+        if events:
+            return events
     except Exception:
         pass
     return load_jsonl(path)
