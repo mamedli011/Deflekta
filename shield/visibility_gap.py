@@ -58,6 +58,45 @@ WALK_JS = r"""
     }
     return parts.join(' > ');
   }
+  // Does scrolling container c move el? Not if el (or an ancestor below c) is position:fixed, or is
+  // absolutely positioned with its containing block outside c. Transforms are ignored (conservative:
+  // answering "no" keeps the plain document check).
+  function scrolledBy(el, c) {
+    let needPositioned = false;
+    for (let n = el; n && n !== c; n = n.parentElement) {
+      const p = getComputedStyle(n).position;
+      if (p === 'fixed') return false;
+      if (needPositioned && p !== 'static') needPositioned = false;
+      if (p === 'absolute') needPositioned = true;
+    }
+    return !(needPositioned && getComputedStyle(c).position === 'static');
+  }
+  // Outside the document on either axis. Inside an overflow:auto/scroll container, content at a
+  // positive offset is reachable by scrolling that container, so it only counts as offscreen if it
+  // sits before the container's scroll origin (e.g. left:-9999px), lies outside it on an axis the
+  // container can't scroll, or the container itself is offscreen. overflow:hidden/clip never rescues.
+  function isOffscreen(el, r) {
+    const x = r.left + window.scrollX, y = r.top + window.scrollY;
+    const outX = x + r.width <= 0 || x >= docW, outY = y + r.height <= 0 || y >= docH;
+    if (!outX && !outY) return false;
+    for (let c = el.parentElement; c && c !== document.body && c !== document.documentElement; c = c.parentElement) {
+      const ccs = getComputedStyle(c);
+      const sx = /auto|scroll/.test(ccs.overflowX), sy = /auto|scroll/.test(ccs.overflowY);
+      if (!sx && !sy) {
+        if (/hidden|clip/.test(ccs.overflowX + ccs.overflowY)) return true;   // clipped on the way: no rescue
+        continue;
+      }
+      if (!scrolledBy(el, c)) return true;
+      if ((outX && !sx) || (outY && !sy)) return true;
+      const cr = c.getBoundingClientRect();
+      const relX = r.left - cr.left - c.clientLeft + c.scrollLeft;
+      const relY = r.top - cr.top - c.clientTop + c.scrollTop;
+      if (relX + r.width <= 0 || relY + r.height <= 0) return true;              // before the scroll origin
+      if (relX >= c.scrollWidth || relY >= c.scrollHeight) return true;         // beyond the scroll range
+      return isOffscreen(c, cr);
+    }
+    return true;
+  }
 
   const all = document.body ? document.body.querySelectorAll('*') : [];
   for (const el of all) {
@@ -81,8 +120,7 @@ WALK_JS = r"""
 
     if (!reasons.includes('display_none')) {
       const r = el.getBoundingClientRect();
-      const x = r.left + window.scrollX, y = r.top + window.scrollY;
-      if (x + r.width <= 0 || y + r.height <= 0 || x >= docW || y >= docH) reasons.push('offscreen');
+      if (isOffscreen(el, r)) reasons.push('offscreen');
       if ((r.width < 2 || r.height < 2) && cs.overflow === 'hidden') reasons.push('clipped');
       if (cs.clipPath && cs.clipPath !== 'none' && /inset\(\s*(50%|100%)/.test(cs.clipPath)) reasons.push('clipped');
       if (cs.clip && /rect\(\s*0(px)?[ ,]+0(px)?[ ,]+0(px)?[ ,]+0(px)?\s*\)/.test(cs.clip)) reasons.push('clipped');

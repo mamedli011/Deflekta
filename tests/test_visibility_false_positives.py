@@ -75,6 +75,20 @@ CASES = {
                                          ".sc{height:120px;overflow:auto}"),
                                     ["Reader comment: we doubled the garlic and let the sauce simmer for an "
                                      "extra ten minutes."]),
+    "overflow_scroll_below_fold": (page('<div class="sc">' + "<p>Scroll filler row.</p>" * 60
+                                        + "<p>Bottom row of the always-scrollable box.</p></div>",
+                                        ".sc{height:120px;overflow:scroll}"),
+                                   ["Bottom row of the always-scrollable box."]),
+    "nested_scroll_boxes": (page('<div class="outer">' + "<p>Outer filler row.</p>" * 40
+                                 + '<div class="inner">' + "<p>Inner filler row.</p>" * 40
+                                 + "<p>Deepest line inside the inner scroll box.</p></div></div>",
+                                 ".outer{height:200px;overflow:auto}.inner{height:100px;overflow:auto}"),
+                            ["Deepest line inside the inner scroll box."]),
+    "horizontal_scroll_table": (page('<div class="hx"><table><tr>'
+                                     + "<td>Column filler cell</td>" * 80
+                                     + "<td>Rightmost cell reached by scrolling sideways.</td></tr></table></div>",
+                                     ".hx{width:400px;overflow-x:auto}td{white-space:nowrap}"),
+                                ["Rightmost cell reached by scrolling sideways."]),
     "long_page_below_viewport": (page("<p>Intro paragraph at the top of the page.</p>" + "<p>Middle filler text.</p>" * 120
                                       + "<p>Final paragraph far below the first screen.</p>"),
                                  ["Final paragraph far below the first screen."]),
@@ -98,10 +112,33 @@ CASES = {
 
 # Known false positives in the CURRENT detector, recorded honestly instead of changing the expectation.
 # strict=True: when the detector is fixed these XPASS and fail the suite, so the marker gets removed.
-KNOWN_FALSE_POSITIVES = {
-    "scrollable_box_below_fold": "offscreen rule compares against document height; content inside an "
-                                 "overflow:auto box beyond its initial view is reachable by scrolling",
-    "scrollable_box_long_comment": "same scroll-box bug; long sentences there are STRIPPED (high) today",
+# (The scroll-container false positive was fixed in R4-T5b stage 1; its two entries were removed.)
+KNOWN_FALSE_POSITIVES: dict[str, str] = {}
+
+# Text a scroll container must NOT rescue: still offscreen after the stage-1 scroll fix.
+# name -> (html, sentence that must be reported hidden as offscreen)
+UNREACHABLE = {
+    "scroll_box_negative_left": (page('<div class="sc"><p>Normal line in the box.</p>'
+                                      '<p class="neg">Pushed far left inside the scroll box, unreachable.</p></div>',
+                                      ".sc{position:relative;height:120px;overflow:auto}"
+                                      ".neg{position:absolute;left:-9999px;top:10px}"),
+                                 "Pushed far left inside the scroll box, unreachable."),
+    "scroll_box_negative_top": (page('<div class="sc"><p class="up">Shifted above the scroll origin, unreachable.</p>'
+                                     "<p>Normal line in the box.</p></div>",
+                                     ".sc{height:120px;overflow:auto}.up{position:relative;top:-3000px}"),
+                                "Shifted above the scroll origin, unreachable."),
+    "fixed_far_below_inside_scroll_box": (page('<div class="sc"><p>Normal line in the box.</p>'
+                                               '<p class="fx">Fixed far below the viewport, never scrolled in.</p></div>',
+                                               ".sc{height:120px;overflow:auto}.fx{position:fixed;top:5000px}"),
+                                          "Fixed far below the viewport, never scrolled in."),
+    "scroll_box_itself_offscreen": (page('<div class="sc">' + "<p>Filler inside a hidden box.</p>" * 30
+                                         + "<p>Content of a scroll box placed off the page.</p></div>",
+                                         ".sc{position:absolute;left:-9999px;height:120px;overflow:auto}"),
+                                    "Content of a scroll box placed off the page."),
+    "clipped_inside_scroll_box": (page('<div class="sc"><div class="clip">' + "<p>Clip filler.</p>" * 40
+                                       + "<p>Clipped by overflow hidden inside a scroll box.</p></div></div>",
+                                       ".sc{height:120px;overflow:auto}.clip{height:0;overflow:hidden}"),
+                                  "Clipped by overflow hidden inside a scroll box."),   # hidden/clip never rescues
 }
 CASE_PARAMS = [pytest.param(n, marks=pytest.mark.xfail(strict=True, reason=KNOWN_FALSE_POSITIVES[n]))
                if n in KNOWN_FALSE_POSITIVES else n for n in CASES]
@@ -115,7 +152,7 @@ class _QuietHandler(http.server.SimpleHTTPRequestHandler):
 @pytest.fixture(scope="module")
 def site(tmp_path_factory):
     d = tmp_path_factory.mktemp("benign_fp")
-    for name, (html, _) in CASES.items():
+    for name, (html, _) in {**CASES, **UNREACHABLE}.items():
         (d / f"{name}.html").write_text(html, encoding="utf-8")
     handler = partial(_QuietHandler, directory=str(d))
     httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
@@ -158,3 +195,13 @@ def test_every_case_page_has_no_serious_gap(scanned):
     serious = {n: [s for s in scanned(n)[1] if len(s) > LOW_SEVERITY_MAX_CHARS] for n in CASES
                if n != "closed_details_summary_only" and n not in KNOWN_FALSE_POSITIVES}
     assert not any(serious.values()), {n: s for n, s in serious.items() if s}
+
+
+@pytest.mark.parametrize("name", UNREACHABLE)
+def test_scroll_container_does_not_rescue_unreachable_text(name, scanned):
+    """The scroll fix only rescues content a person can scroll to. These stay hidden as offscreen."""
+    scan, spans = scanned(name)
+    sentence = UNREACHABLE[name][1]
+    hits = [s for s in scan["segments"] if sentence in s["text"]]
+    assert hits and hits[0]["technique"] == "offscreen", f"{name}: expected offscreen, got {hits}"
+    assert any(sentence in s for s in spans), f"{name}: unreachable text must be in the gap: {spans}"
